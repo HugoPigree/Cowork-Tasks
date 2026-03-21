@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import type { Task, TaskPriority, TaskStatus, WorkspaceMember } from "@/lib/types"
+import type { Task, TaskPriority, WorkspaceMember } from "@/lib/types"
 
 function toDatetimeLocal(iso: string | null): string {
   if (!iso) return ""
@@ -30,10 +30,11 @@ function toDatetimeLocal(iso: string | null): string {
 type SavePayload = {
   title: string
   description: string
-  status: TaskStatus
   priority: TaskPriority
   due_date: string | null
   assignee_id: number | null
+  /** Création : colonne cible (GitHub Projects) */
+  board_column_id?: number
 }
 
 type Props = {
@@ -42,6 +43,8 @@ type Props = {
   task: Task | null
   members: WorkspaceMember[]
   onSave: (data: SavePayload) => Promise<void>
+  /** Création depuis une colonne du tableau */
+  defaultColumnId?: number
 }
 
 export function TaskFormDialog({
@@ -50,10 +53,10 @@ export function TaskFormDialog({
   task,
   members,
   onSave,
+  defaultColumnId,
 }: Props) {
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-  const [status, setStatus] = useState<TaskStatus>("todo")
   const [priority, setPriority] = useState<TaskPriority>("medium")
   const [dueLocal, setDueLocal] = useState("")
   const [assigneeKey, setAssigneeKey] = useState<string>("__none__")
@@ -64,7 +67,6 @@ export function TaskFormDialog({
     if (task) {
       setTitle(task.title)
       setDescription(task.description)
-      setStatus(task.status)
       setPriority(task.priority)
       setDueLocal(toDatetimeLocal(task.due_date))
       setAssigneeKey(
@@ -73,12 +75,11 @@ export function TaskFormDialog({
     } else {
       setTitle("")
       setDescription("")
-      setStatus("todo")
       setPriority("medium")
       setDueLocal("")
       setAssigneeKey("__none__")
     }
-  }, [open, task])
+  }, [open, task, defaultColumnId])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -89,10 +90,11 @@ export function TaskFormDialog({
       await onSave({
         title,
         description,
-        status,
         priority,
         due_date: dueLocal ? new Date(dueLocal).toISOString() : null,
         assignee_id,
+        board_column_id:
+          !task && defaultColumnId != null ? defaultColumnId : undefined,
       })
       onOpenChange(false)
     } finally {
@@ -148,39 +150,21 @@ export function TaskFormDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Statut</Label>
-                <Select
-                  value={status}
-                  onValueChange={(v) => setStatus(v as TaskStatus)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todo">À faire</SelectItem>
-                    <SelectItem value="in_progress">En cours</SelectItem>
-                    <SelectItem value="done">Terminé</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Priorité</Label>
-                <Select
-                  value={priority}
-                  onValueChange={(v) => setPriority(v as TaskPriority)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Basse</SelectItem>
-                    <SelectItem value="medium">Moyenne</SelectItem>
-                    <SelectItem value="high">Haute</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="grid gap-2">
+              <Label>Priorité</Label>
+              <Select
+                value={priority}
+                onValueChange={(v) => setPriority(v as TaskPriority)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Basse</SelectItem>
+                  <SelectItem value="medium">Moyenne</SelectItem>
+                  <SelectItem value="high">Haute</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="due">Échéance (optionnel)</Label>

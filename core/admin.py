@@ -1,7 +1,15 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from core.models import Task, User, Workspace, WorkspaceMembership
+from core.models import (
+    Board,
+    BoardColumn,
+    Task,
+    TaskComment,
+    User,
+    Workspace,
+    WorkspaceMembership,
+)
 
 
 @admin.register(User)
@@ -9,6 +17,23 @@ class UserAdmin(DjangoUserAdmin):
     """Admin UI for the custom user model."""
 
     pass
+
+
+class BoardColumnInline(admin.TabularInline):
+    model = BoardColumn
+    extra = 0
+
+
+@admin.register(Board)
+class BoardAdmin(admin.ModelAdmin):
+    list_display = ("id", "workspace", "created_at")
+    inlines = [BoardColumnInline]
+
+
+@admin.register(BoardColumn)
+class BoardColumnAdmin(admin.ModelAdmin):
+    list_display = ("name", "board", "position", "maps_to_status", "wip_limit")
+    list_filter = ("maps_to_status",)
 
 
 @admin.register(Workspace)
@@ -28,12 +53,20 @@ class TaskAdmin(admin.ModelAdmin):
     list_display = (
         "title",
         "workspace",
+        "parent",
         "assignee",
         "created_by",
         "status",
         "priority",
+        "position",
         "created_at",
         "due_date",
     )
     list_filter = ("status", "priority", "workspace")
     search_fields = ("title", "workspace__name", "assignee__username")
+
+
+@admin.register(TaskComment)
+class TaskCommentAdmin(admin.ModelAdmin):
+    list_display = ("task", "author", "created_at")
+    search_fields = ("body", "author__username")

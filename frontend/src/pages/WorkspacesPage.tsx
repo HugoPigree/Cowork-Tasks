@@ -1,9 +1,29 @@
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { ArrowLeft, Plus, Trash2, Users } from "lucide-react"
+import {
+  ArrowLeft,
+  Github,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
+  Users,
+} from "lucide-react"
 import { ApiError, workspacesApi } from "@/lib/api"
+import { useAuth } from "@/context/AuthContext"
 import { useWorkspace } from "@/context/WorkspaceContext"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -19,14 +39,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
-import type { WorkspaceMember } from "@/lib/types"
+import type { Workspace, WorkspaceMember } from "@/lib/types"
+import { gitHubRepoHref } from "@/components/tasks/ProjectBoardToolbar"
 
 export function WorkspacesPage() {
   const navigate = useNavigate()
+  const { userId } = useAuth()
   const {
     workspaces,
     currentWorkspaceId,
@@ -38,6 +66,7 @@ export function WorkspacesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [githubUrl, setGithubUrl] = useState("")
   const [saving, setSaving] = useState(false)
 
   const [membersOpen, setMembersOpen] = useState(false)
@@ -46,7 +75,22 @@ export function WorkspacesPage() {
   const [addUsername, setAddUsername] = useState("")
   const [membersLoading, setMembersLoading] = useState(false)
 
+  const [editOpen, setEditOpen] = useState(false)
+  const [editWsId, setEditWsId] = useState<number | null>(null)
+  const [editName, setEditName] = useState("")
+  const [editDescription, setEditDescription] = useState("")
+  const [editGithubUrl, setEditGithubUrl] = useState("")
+  const [editSaving, setEditSaving] = useState(false)
+
+  const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+
   const activeWs = workspaces.find((w) => w.id === membersWsId)
+  const editingWs = workspaces.find((w) => w.id === editWsId)
+
+  function isCreator(w: Workspace) {
+    return userId !== null && w.created_by === userId
+  }
 
   async function openMembers(wsId: number) {
     setMembersWsId(wsId)
@@ -60,6 +104,14 @@ export function WorkspacesPage() {
     } finally {
       setMembersLoading(false)
     }
+  }
+
+  function openEdit(w: Workspace) {
+    setEditWsId(w.id)
+    setEditName(w.name)
+    setEditDescription(w.description ?? "")
+    setEditGithubUrl(w.github_url ?? "")
+    setEditOpen(true)
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -82,9 +134,52 @@ export function WorkspacesPage() {
     }
   }
 
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editWsId) return
+    const nextName = editName.trim()
+    if (!nextName) {
+      toast.error("Le nom est requis")
+      return
+    }
+    setEditSaving(true)
+    try {
+      await workspacesApi.update(editWsId, {
+        name: nextName,
+        description: editDescription.trim(),
+        github_url: editGithubUrl.trim(),
+      })
+      toast.success("Espace mis à jour")
+      setEditOpen(false)
+      setEditWsId(null)
+      await refreshWorkspaces()
+    } catch (err) {
+      if (err instanceof ApiError) toast.error(err.message)
+      else toast.error("Erreur réseau")
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  async function confirmDeleteWorkspace() {
+    if (!deleteTarget) return
+    setDeleteLoading(true)
+    try {
+      await workspacesApi.delete(deleteTarget.id)
+      toast.success("Espace supprimé")
+      setDeleteTarget(null)
+      await refreshWorkspaces()
+    } catch (err) {
+      if (err instanceof ApiError) toast.error(err.message)
+      else toast.error("Erreur réseau")
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault()
-    if (!membersWsId) return
+    if (!membersWsId || !activeWs || !isCreator(activeWs)) return
     try {
       await workspacesApi.addMember(membersWsId, addUsername.trim())
       toast.success("Membre ajouté")
@@ -96,10 +191,10 @@ export function WorkspacesPage() {
     }
   }
 
-  async function handleRemoveMember(userId: number) {
-    if (!membersWsId) return
+  async function handleRemoveMember(userIdToRemove: number) {
+    if (!membersWsId || !activeWs || !isCreator(activeWs)) return
     try {
-      await workspacesApi.removeMember(membersWsId, userId)
+      await workspacesApi.removeMember(membersWsId, userIdToRemove)
       toast.success("Membre retiré")
       setMembers(await workspacesApi.members(membersWsId))
       await refreshWorkspaces()
@@ -148,48 +243,102 @@ export function WorkspacesPage() {
           </Card>
         ) : (
           <div className="grid gap-3">
-            {workspaces.map((w) => (
-              <Card
-                key={w.id}
-                className={
-                  w.id === currentWorkspaceId ? "border-primary/50 shadow-sm" : ""
-                }
-              >
-                <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-                  <div>
-                    <CardTitle className="text-lg">{w.name}</CardTitle>
-                    <CardDescription className="mt-1 line-clamp-2">
-                      {w.description || "Pas de description"}
-                    </CardDescription>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {w.member_count} membre{w.member_count > 1 ? "s" : ""} · vous
-                      êtes <span className="font-medium">{w.my_role}</span>
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1"
-                      onClick={() => openMembers(w.id)}
-                    >
-                      <Users className="h-4 w-4" />
-                      Membres
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={w.id === currentWorkspaceId ? "secondary" : "default"}
-                      onClick={() => {
-                        setCurrentWorkspaceId(w.id)
-                        navigate("/")
-                      }}
-                    >
-                      {w.id === currentWorkspaceId ? "Actif" : "Ouvrir"}
-                    </Button>
-                  </div>
-                </CardHeader>
-              </Card>
-            ))}
+            {workspaces.map((w) => {
+              const creator = isCreator(w)
+              const cardRepo = gitHubRepoHref(w.github_url)
+              return (
+                <Card
+                  key={w.id}
+                  className={
+                    w.id === currentWorkspaceId ? "border-primary/50 shadow-sm" : ""
+                  }
+                >
+                  <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+                    <div className="min-w-0 pr-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CardTitle className="text-lg">{w.name}</CardTitle>
+                        {cardRepo ? (
+                          <a
+                            href={cardRepo}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            aria-label="Ouvrir le dépôt GitHub"
+                          >
+                            <Github className="h-4 w-4" />
+                          </a>
+                        ) : null}
+                        {creator ? (
+                          <Badge variant="secondary" className="text-[10px] font-normal">
+                            Créateur
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <CardDescription className="mt-1 line-clamp-2">
+                        {w.description || "Pas de description"}
+                      </CardDescription>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {w.member_count} membre{w.member_count > 1 ? "s" : ""} · rôle :{" "}
+                        <span className="font-medium text-foreground/90">
+                          {w.my_role}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                      {creator ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              aria-label="Actions sur l&apos;espace"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="gap-2"
+                              onClick={() => openEdit(w)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Renommer…
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="gap-2 text-destructive focus:text-destructive"
+                              onClick={() => setDeleteTarget(w)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Supprimer l&apos;espace…
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => openMembers(w.id)}
+                      >
+                        <Users className="h-4 w-4" />
+                        Membres
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={w.id === currentWorkspaceId ? "secondary" : "default"}
+                        onClick={() => {
+                          setCurrentWorkspaceId(w.id)
+                          navigate("/")
+                        }}
+                      >
+                        {w.id === currentWorkspaceId ? "Actif" : "Ouvrir"}
+                      </Button>
+                    </div>
+                  </CardHeader>
+                </Card>
+              )
+            })}
           </div>
         )}
       </main>
@@ -200,7 +349,9 @@ export function WorkspacesPage() {
             <DialogHeader>
               <DialogTitle>Nouvel espace de travail</DialogTitle>
               <DialogDescription>
-                Un espace = un projet ou une équipe. Vous serez owner et pourrez inviter des comptes existants par leur nom d&apos;utilisateur.
+                Un espace = un projet ou une équipe. Vous serez créateur et owner ;
+                seul le créateur peut inviter des membres, renommer ou supprimer
+                l&apos;espace.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -223,6 +374,17 @@ export function WorkspacesPage() {
                   rows={3}
                 />
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ws-gh">Dépôt GitHub (optionnel)</Label>
+                <Input
+                  id="ws-gh"
+                  type="url"
+                  inputMode="url"
+                  value={githubUrl}
+                  onChange={(e) => setGithubUrl(e.target.value)}
+                  placeholder="https://github.com/org/repo"
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
@@ -236,15 +398,83 @@ export function WorkspacesPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={editOpen}
+        onOpenChange={(o) => {
+          setEditOpen(o)
+          if (!o) setEditWsId(null)
+        }}
+      >
+        <DialogContent>
+          <form onSubmit={(e) => void handleSaveEdit(e)}>
+            <DialogHeader>
+              <DialogTitle>Modifier l&apos;espace</DialogTitle>
+              <DialogDescription>
+                {editingWs?.name} — visible par tous les membres.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-ws-name">Nom</Label>
+                <Input
+                  id="edit-ws-name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-ws-desc">Description</Label>
+                <Textarea
+                  id="edit-ws-desc"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  rows={3}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-ws-gh">Dépôt GitHub (optionnel)</Label>
+                <Input
+                  id="edit-ws-gh"
+                  type="url"
+                  inputMode="url"
+                  value={editGithubUrl}
+                  onChange={(e) => setEditGithubUrl(e.target.value)}
+                  placeholder="https://github.com/org/repo"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+                Annuler
+              </Button>
+              <Button type="submit" disabled={editSaving}>
+                {editSaving ? "…" : "Enregistrer"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={membersOpen} onOpenChange={setMembersOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Membres — {activeWs?.name}</DialogTitle>
             <DialogDescription>
-              Seul un <strong>owner</strong> peut ajouter ou retirer des membres (les owners ne peuvent pas être retirés ici).
+              {activeWs && isCreator(activeWs) ? (
+                <>
+                  En tant que <strong>créateur</strong>, vous pouvez inviter ou retirer
+                  des membres.
+                </>
+              ) : (
+                <>
+                  Seul le <strong>créateur</strong> de l&apos;espace peut inviter ou
+                  retirer des membres. Vous pouvez consulter la liste ci-dessous.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
-          {activeWs?.my_role === "owner" ? (
+          {activeWs && isCreator(activeWs) ? (
             <form onSubmit={handleAddMember} className="flex gap-2 py-2">
               <Input
                 placeholder="Nom d'utilisateur"
@@ -269,7 +499,9 @@ export function WorkspacesPage() {
                     <span className="font-medium">{m.user.username}</span>
                     <span className="ml-2 text-muted-foreground">({m.role})</span>
                   </span>
-                  {activeWs?.my_role === "owner" && m.role !== "owner" ? (
+                  {activeWs &&
+                  isCreator(activeWs) &&
+                  m.role !== "owner" ? (
                     <Button
                       type="button"
                       variant="ghost"
@@ -286,6 +518,34 @@ export function WorkspacesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer cet espace ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.name} — toutes les tâches et colonnes seront supprimées.
+              Cette action est irréversible.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteLoading}
+              onClick={(e) => {
+                e.preventDefault()
+                void confirmDeleteWorkspace()
+              }}
+            >
+              {deleteLoading ? "…" : "Supprimer"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

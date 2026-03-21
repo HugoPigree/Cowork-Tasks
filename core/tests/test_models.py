@@ -2,7 +2,7 @@
 import pytest
 from django.contrib.auth import get_user_model
 
-from core.models import Task, Workspace, WorkspaceMembership
+from core.models import Task, Workspace, WorkspaceMembership, ensure_workspace_board
 
 User = get_user_model()
 
@@ -20,13 +20,16 @@ def workspace(user):
         user=user,
         role=WorkspaceMembership.Role.OWNER,
     )
+    ensure_workspace_board(ws)
     return ws
 
 
 @pytest.mark.django_db
 def test_task_str_representation(user, workspace):
+    col = workspace.board.columns.order_by("position").first()
     task = Task.objects.create(
         workspace=workspace,
+        board_column=col,
         created_by=user,
         title="Buy milk",
         status=Task.Status.TODO,
@@ -38,8 +41,10 @@ def test_task_str_representation(user, workspace):
 
 @pytest.mark.django_db
 def test_task_cascade_delete_when_workspace_removed(user, workspace):
+    col = workspace.board.columns.order_by("position").first()
     Task.objects.create(
         workspace=workspace,
+        board_column=col,
         created_by=user,
         title="Cascade me",
     )

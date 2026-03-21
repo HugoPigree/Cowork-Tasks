@@ -69,6 +69,23 @@ def main():
         ws_id = wlist[0].get("id")
     check("GET /api/workspaces/", code == 200 and ws_id is not None, f"HTTP {code}, ws={ws_id}")
 
+    code, body = req("GET", f"{base}/objectives/", headers=auth)
+    ok_obj = code == 200 and isinstance(body, list) and len(body) > 0
+    check("GET /api/objectives/", ok_obj, f"HTTP {code}")
+
+    code, body = req(
+        "POST",
+        f"{base}/objectives/generate/",
+        {"objective_id": "ecommerce"},
+        headers=auth,
+    )
+    ok_gen = (
+        code == 200
+        and isinstance(body, dict)
+        and len(body.get("suggestions") or []) > 0
+    )
+    check("POST /api/objectives/generate/", ok_gen, f"HTTP {code}")
+
     code, _ = req("GET", f"{base}/tasks/")
     check("GET /api/tasks/ sans JWT -> 401", code == 401, f"HTTP {code}")
 

@@ -1,6 +1,10 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
+import {
+  RegisterAvatarPicker,
+  type RegisterAvatarChoice,
+} from "@/components/auth/RegisterAvatarPicker"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -12,6 +16,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import type { RegisterPayload } from "@/context/AuthContext"
 import { useAuth } from "@/context/AuthContext"
 import { ApiError } from "@/lib/api"
 
@@ -33,18 +38,48 @@ export function RegisterPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [passwordConfirm, setPasswordConfirm] = useState("")
+  const [avatarChoice, setAvatarChoice] = useState<RegisterAvatarChoice>({
+    kind: "none",
+  })
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    return () => {
+      if (avatarChoice.kind === "file") {
+        URL.revokeObjectURL(avatarChoice.previewUrl)
+      }
+    }
+  }, [avatarChoice])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     try {
-      await register({
-        username,
-        email,
-        password,
-        password_confirm: passwordConfirm,
-      })
+      if (avatarChoice.kind === "file") {
+        const fd = new FormData()
+        fd.append("username", username)
+        fd.append("email", email)
+        fd.append("password", password)
+        fd.append("password_confirm", passwordConfirm)
+        fd.append("avatar", avatarChoice.file)
+        await register(fd)
+      } else if (avatarChoice.kind === "url") {
+        const payload: RegisterPayload = {
+          username,
+          email,
+          password,
+          password_confirm: passwordConfirm,
+          avatar_url: avatarChoice.url,
+        }
+        await register(payload)
+      } else {
+        await register({
+          username,
+          email,
+          password,
+          password_confirm: passwordConfirm,
+        })
+      }
       toast.success("Compte créé — connectez-vous")
       navigate("/login", { replace: true })
     } catch (err) {
@@ -60,17 +95,22 @@ export function RegisterPage() {
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-6">
-      <Card className="w-full max-w-md border-border/60 shadow-lg">
+      <Card className="w-full max-w-lg border-border/60 shadow-lg">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-semibold tracking-tight">
             Créer un compte
           </CardTitle>
           <CardDescription>
-            Un compte gratuit pour isoler vos tâches (JWT sécurisé).
+            Avatar optionnel (initiales DiceBear, aléatoire ou fichier), puis accès JWT.
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="grid gap-4">
+            <RegisterAvatarPicker
+              username={username}
+              value={avatarChoice}
+              onChange={setAvatarChoice}
+            />
             <div className="grid gap-2">
               <Label htmlFor="user">Nom d&apos;utilisateur</Label>
               <Input

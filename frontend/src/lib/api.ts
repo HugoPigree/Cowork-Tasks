@@ -1,11 +1,19 @@
 import type {
+  BoardColumn,
   Paginated,
   Task,
+  TaskComment,
   TaskOrdering,
   TaskPriority,
+  TaskReorderItem,
   TaskStatus,
+  MeResponse,
+  ObjectiveSummary,
+  RegisterResponse,
+  SuggestedTaskTemplate,
   TokenResponse,
   Workspace,
+  WorkspaceBoard,
   WorkspaceMember,
 } from "./types"
 
@@ -31,6 +39,8 @@ export class ApiError extends Error {
     this.body = body
   }
 }
+
+type ApiFetchOptions = RequestInit & { json?: unknown; formData?: FormData }
 
 function parseJson(text: string): unknown {
   if (!text) return null
@@ -60,13 +70,15 @@ async function tryRefresh(): Promise<boolean> {
 
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit & { json?: unknown } = {},
+  options: ApiFetchOptions = {},
   retried = false
 ): Promise<T> {
-  const { json, headers, ...rest } = options
+  const { json, formData, headers, ...rest } = options
   const hdrs = new Headers(headers)
   hdrs.set("Accept", "application/json")
-  if (json !== undefined) {
+  if (formData !== undefined) {
+    rest.body = formData
+  } else if (json !== undefined) {
     hdrs.set("Content-Type", "application/json")
     rest.body = JSON.stringify(json)
   }
@@ -85,7 +97,7 @@ export async function apiFetch<T>(
     !path.includes("auth/token/refresh")
   ) {
     const refreshed = await tryRefresh()
-    if (refreshed) return apiFetch<T>(path, options, true)
+    if (refreshed) return apiFetch<T>(path, options as ApiFetchOptions, true)
   }
 
   if (!res.ok) {
@@ -100,21 +112,36 @@ export const authApi = {
       method: "POST",
       json: { username, password },
     }),
-  register: (payload: {
-    username: string
-    email: string
-    password: string
-    password_confirm: string
-  }) =>
-    apiFetch<{ id: number; username: string; email: string }>(
-      "/api/auth/register/",
-      { method: "POST", json: payload }
-    ),
+  me: () => apiFetch<MeResponse>("/api/auth/me/"),
+  register: (
+    input:
+      | {
+          username: string
+          email: string
+          password: string
+          password_confirm: string
+          avatar_url?: string
+        }
+      | FormData
+  ) =>
+    input instanceof FormData
+      ? apiFetch<RegisterResponse>("/api/auth/register/", {
+          method: "POST",
+          formData: input,
+        })
+      : apiFetch<RegisterResponse>("/api/auth/register/", {
+          method: "POST",
+          json: input,
+        }),
 }
 
 export const workspacesApi = {
   list: () => apiFetch<Workspace[]>("/api/workspaces/"),
-  create: (body: { name: string; description?: string }) =>
+  create: (body: {
+    name: string
+    description?: string
+    github_url?: string
+  }) =>
     apiFetch<Workspace>("/api/workspaces/", { method: "POST", json: body }),
   members: (id: number) =>
     apiFetch<WorkspaceMember[]>(`/api/workspaces/${id}/members/`),
@@ -127,24 +154,65 @@ export const workspacesApi = {
     apiFetch<null>(`/api/workspaces/${workspaceId}/members/${userId}/`, {
       method: "DELETE",
     }),
+  board: (id: number) =>
+    apiFetch<WorkspaceBoard>(`/api/workspaces/${id}/board/`),
+  update: (
+    id: number,
+    body: { name?: string; description?: string; github_url?: string }
+  ) =>
+    apiFetch<Workspace>(`/api/workspaces/${id}/`, {
+      method: "PATCH",
+      json: body,
+    }),
+  delete: (id: number) =>
+    apiFetch<null>(`/api/workspaces/${id}/`, { method: "DELETE" }),
+  createBoardColumn: (
+    workspaceId: number,
+    body: {
+      name: string
+      position?: number
+      wip_limit?: number | null
+      color?: string
+      maps_to_status?: TaskStatus
+    }
+  ) =>
+    apiFetch<BoardColumn>(`/api/workspaces/${workspaceId}/board/columns/`, {
+      method: "POST",
+      json: body,
+    }),
+}
+
+export const objectivesApi = {
+  list: () => apiFetch<ObjectiveSummary[]>("/api/objectives/"),
+  generate: (objectiveId: string) =>
+    apiFetch<{ suggestions: SuggestedTaskTemplate[] }>(
+      "/api/objectives/generate/",
+      { method: "POST", json: { objective_id: objectiveId } }
+    ),
 }
 
 export const tasksApi = {
   list: (params: {
     workspace: number
     page?: number
+    page_size?: number
     status?: TaskStatus | ""
     priority?: TaskPriority | ""
     assignee?: string
     ordering?: TaskOrdering
+    search?: string
+    root_only?: boolean
   }) => {
     const q = new URLSearchParams()
     q.set("workspace", String(params.workspace))
     if (params.page) q.set("page", String(params.page))
+    if (params.page_size) q.set("page_size", String(params.page_size))
     if (params.status) q.set("status", params.status)
     if (params.priority) q.set("priority", params.priority)
     if (params.assignee) q.set("assignee", params.assignee)
     if (params.ordering) q.set("ordering", params.ordering)
+    if (params.search?.trim()) q.set("search", params.search.trim())
+    if (params.root_only) q.set("root_only", "true")
     return apiFetch<Paginated<Task>>(`/api/tasks/?${q.toString()}`)
   },
   get: (id: number) => apiFetch<Task>(`/api/tasks/${id}/`),
@@ -156,6 +224,8 @@ export const tasksApi = {
     priority?: TaskPriority
     due_date?: string | null
     assignee_id?: number | null
+    board_column_id?: number
+    estimate?: number | null
   }) => apiFetch<Task>("/api/tasks/", { method: "POST", json: body }),
   patch: (
     id: number,
@@ -164,10 +234,26 @@ export const tasksApi = {
       description: string
       status: TaskStatus
       priority: TaskPriority
+      position: number
       due_date: string | null
       assignee_id: number | null
+      board_column_id: number
+      estimate: number | null
+      depends_on_ids: number[]
     }>
   ) => apiFetch<Task>(`/api/tasks/${id}/`, { method: "PATCH", json: body }),
   delete: (id: number) =>
     apiFetch<null>(`/api/tasks/${id}/`, { method: "DELETE" }),
+  reorder: (body: { workspace: number; items: TaskReorderItem[] }) =>
+    apiFetch<{ updated: number }>("/api/tasks/reorder/", {
+      method: "POST",
+      json: body,
+    }),
+  listComments: (taskId: number) =>
+    apiFetch<TaskComment[]>(`/api/tasks/${taskId}/comments/`),
+  addComment: (taskId: number, body: string) =>
+    apiFetch<TaskComment>(`/api/tasks/${taskId}/comments/`, {
+      method: "POST",
+      json: { body },
+    }),
 }

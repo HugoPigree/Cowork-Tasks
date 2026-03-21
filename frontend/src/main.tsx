@@ -9,7 +9,12 @@ import { Toaster } from "@/components/ui/sonner"
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="light"
+      forcedTheme="light"
+      enableSystem={false}
+    >
       <BrowserRouter>
         <AuthProvider>
           <App />

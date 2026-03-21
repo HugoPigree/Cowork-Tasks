@@ -1,18 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
-import {
-  CheckSquare2,
-  ChevronLeft,
-  ChevronRight,
-  LayoutGrid,
-  LogOut,
-  Pencil,
-  Plus,
-  Settings2,
-  Trash2,
-  UserCircle2,
-} from "lucide-react"
+import { CheckSquare2, Settings2 } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,16 +12,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -40,71 +21,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { AddBoardColumnDialog } from "@/components/tasks/AddBoardColumnDialog"
+import { KanbanBoard } from "@/components/tasks/KanbanBoard"
+import { ProjectBoardToolbar } from "@/components/tasks/ProjectBoardToolbar"
 import { TaskFormDialog } from "@/components/tasks/TaskFormDialog"
-import { ThemeToggle } from "@/components/ThemeToggle"
-import { useAuth } from "@/context/AuthContext"
+import { TaskModal } from "@/components/tasks/TaskModal"
+import { BacklogObjectivePanel } from "@/components/tasks/BacklogObjectivePanel"
+import { UserAccountMenu } from "@/components/layout/UserAccountMenu"
 import { useWorkspace } from "@/context/WorkspaceContext"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { ApiError, tasksApi, workspacesApi } from "@/lib/api"
 import type {
+  BoardColumn,
   Task,
-  TaskOrdering,
   TaskPriority,
+  TaskReorderItem,
   TaskStatus,
   WorkspaceMember,
 } from "@/lib/types"
 
-const PAGE_SIZE = 10
-
-const statusLabel: Record<TaskStatus, string> = {
-  todo: "À faire",
-  in_progress: "En cours",
-  done: "Terminé",
-}
-
-const priorityLabel: Record<TaskPriority, string> = {
-  low: "Basse",
-  medium: "Moyenne",
-  high: "Haute",
-}
-
-function statusVariant(
-  s: TaskStatus
-): "default" | "secondary" | "outline" | "destructive" {
-  if (s === "done") return "secondary"
-  if (s === "in_progress") return "default"
-  return "outline"
-}
-
-function priorityVariant(
-  p: TaskPriority
-): "default" | "secondary" | "outline" | "destructive" {
-  if (p === "high") return "destructive"
-  if (p === "medium") return "default"
-  return "outline"
-}
-
-function formatDate(iso: string | null) {
-  if (!iso) return "—"
-  return new Date(iso).toLocaleString("fr-FR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  })
-}
-
-const orderingLabels: Record<TaskOrdering, string> = {
-  "-priority": "Priorité (haute → basse)",
-  priority: "Priorité (basse → haute)",
-  due_date: "Échéance (proche d’abord)",
-  "-due_date": "Échéance (lointaines d’abord)",
-  created_at: "Création (anciennes d’abord)",
-  "-created_at": "Création (récentes d’abord)",
-}
-
 export function TasksPage() {
-  const { username, logout } = useAuth()
   const {
     workspaces,
     currentWorkspaceId,
@@ -114,20 +51,35 @@ export function TasksPage() {
   } = useWorkspace()
 
   const [members, setMembers] = useState<WorkspaceMember[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [count, setCount] = useState(0)
-  const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [filterStatus, setFilterStatus] = useState<TaskStatus | "all">("all")
-  const [filterPriority, setFilterPriority] = useState<TaskPriority | "all">(
-    "all"
-  )
-  const [filterAssignee, setFilterAssignee] = useState<string>("all")
-  const [ordering, setOrdering] = useState<TaskOrdering>("-priority")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Task | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null)
+  const [kanbanTasks, setKanbanTasks] = useState<Task[]>([])
+  const [kanbanColumns, setKanbanColumns] = useState<BoardColumn[]>([])
+  const [kanbanLoading, setKanbanLoading] = useState(false)
+  const [modalTask, setModalTask] = useState<Task | null>(null)
+  const [taskModalOpen, setTaskModalOpen] = useState(false)
+  const [searchInput, setSearchInput] = useState("")
+  const debouncedSearch = useDebouncedValue(searchInput, 300)
+  const [createDefaults, setCreateDefaults] = useState<{
+    columnId?: number
+  } | null>(null)
+  const [addColumnOpen, setAddColumnOpen] = useState(false)
+  const [filterAssignee, setFilterAssignee] = useState<string>("all")
+
+  const canManageBoardColumns =
+    currentWorkspace?.my_role === "owner" ||
+    currentWorkspace?.my_role === "admin"
+
+  function openNewTask(columnId?: number) {
+    setEditing(null)
+    if (columnId == null) {
+      setCreateDefaults(null)
+    } else {
+      setCreateDefaults({ columnId })
+    }
+    setDialogOpen(true)
+  }
 
   useEffect(() => {
     if (!currentWorkspaceId) {
@@ -148,60 +100,59 @@ export function TasksPage() {
     }
   }, [currentWorkspaceId])
 
-  const load = useCallback(async () => {
-    if (!currentWorkspaceId) {
-      setTasks([])
-      setCount(0)
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const data = await tasksApi.list({
-        workspace: currentWorkspaceId,
-        page,
-        status: filterStatus === "all" ? "" : filterStatus,
-        priority: filterPriority === "all" ? "" : filterPriority,
-        assignee:
-          filterAssignee === "all"
-            ? ""
-            : filterAssignee === "unassigned"
-              ? "unassigned"
-              : filterAssignee,
-        ordering,
-      })
-      setTasks(data.results)
-      setCount(data.count)
-      setTotalPages(Math.max(1, Math.ceil(data.count / PAGE_SIZE)))
-    } catch {
-      toast.error("Impossible de charger les tâches")
-    } finally {
-      setLoading(false)
-    }
-  }, [
-    currentWorkspaceId,
-    page,
-    filterStatus,
-    filterPriority,
-    filterAssignee,
-    ordering,
-  ])
+  const loadKanbanBoard = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!currentWorkspaceId) {
+        setKanbanTasks([])
+        setKanbanColumns([])
+        return
+      }
+      const silent = opts?.silent === true
+      if (!silent) setKanbanLoading(true)
+      try {
+        const [board, data] = await Promise.all([
+          workspacesApi.board(currentWorkspaceId),
+          tasksApi.list({
+            workspace: currentWorkspaceId,
+            ordering: "kanban",
+            root_only: true,
+            page_size: 200,
+            page: 1,
+            assignee:
+              filterAssignee === "all"
+                ? ""
+                : filterAssignee === "unassigned"
+                  ? "unassigned"
+                  : filterAssignee,
+            search: debouncedSearch,
+          }),
+        ])
+        setKanbanColumns(board.columns)
+        setKanbanTasks(data.results)
+      } catch {
+        if (!silent) toast.error("Impossible de charger le tableau")
+        if (!silent) {
+          setKanbanTasks([])
+          setKanbanColumns([])
+        }
+      } finally {
+        if (!silent) setKanbanLoading(false)
+      }
+    },
+    [currentWorkspaceId, filterAssignee, debouncedSearch],
+  )
 
   useEffect(() => {
-    void load()
-  }, [load])
-
-  useEffect(() => {
-    setPage(1)
-  }, [filterStatus, filterPriority, filterAssignee, ordering, currentWorkspaceId])
+    void loadKanbanBoard()
+  }, [loadKanbanBoard])
 
   async function handleSave(payload: {
     title: string
     description: string
-    status: TaskStatus
     priority: TaskPriority
     due_date: string | null
     assignee_id: number | null
+    board_column_id?: number
   }) {
     if (!currentWorkspaceId) return
     try {
@@ -209,7 +160,6 @@ export function TasksPage() {
         await tasksApi.patch(editing.id, {
           title: payload.title,
           description: payload.description,
-          status: payload.status,
           priority: payload.priority,
           due_date: payload.due_date,
           assignee_id: payload.assignee_id,
@@ -220,14 +170,14 @@ export function TasksPage() {
           workspace: currentWorkspaceId,
           title: payload.title,
           description: payload.description,
-          status: payload.status,
           priority: payload.priority,
           due_date: payload.due_date,
           assignee_id: payload.assignee_id,
+          board_column_id: payload.board_column_id,
         })
         toast.success("Tâche créée")
       }
-      await load()
+      await loadKanbanBoard({ silent: true })
     } catch (err) {
       if (err instanceof ApiError) toast.error("Enregistrement refusé")
       else toast.error("Erreur réseau")
@@ -241,10 +191,62 @@ export function TasksPage() {
       await tasksApi.delete(deleteTarget.id)
       toast.success("Tâche supprimée")
       setDeleteTarget(null)
-      await load()
+      await loadKanbanBoard({ silent: true })
     } catch {
       toast.error("Suppression impossible")
     }
+  }
+
+  async function handleKanbanReorder(items: TaskReorderItem[]) {
+    if (!currentWorkspaceId) return
+    try {
+      await tasksApi.reorder({ workspace: currentWorkspaceId, items })
+      await loadKanbanBoard({ silent: true })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 400) {
+        toast.error(
+          typeof err.body === "object" && err.body && "detail" in err.body
+            ? String((err.body as { detail: string }).detail)
+            : "Déplacement refusé (tâche bloquée par des dépendances ?)",
+        )
+      } else {
+        toast.error("Impossible d’enregistrer le déplacement")
+      }
+      throw new Error("reorder failed")
+    }
+  }
+
+  async function handleCreateBoardColumn(data: {
+    name: string
+    maps_to_status: TaskStatus
+    wip_limit: number | null
+    color: string
+  }) {
+    if (!currentWorkspaceId) return
+    const nextPos =
+      kanbanColumns.length === 0
+        ? 0
+        : Math.max(...kanbanColumns.map((c) => c.position), -1) + 1
+    try {
+      await workspacesApi.createBoardColumn(currentWorkspaceId, {
+        name: data.name,
+        position: nextPos,
+        maps_to_status: data.maps_to_status,
+        color: data.color,
+        wip_limit: data.wip_limit,
+      })
+      toast.success("Colonne ajoutée")
+      await loadKanbanBoard({ silent: true })
+    } catch (err) {
+      if (err instanceof ApiError) toast.error("Impossible d’ajouter la colonne")
+      else toast.error("Erreur réseau")
+      throw err
+    }
+  }
+
+  function openTaskModal(t: Task) {
+    setModalTask(t)
+    setTaskModalOpen(true)
   }
 
   if (wsLoading) {
@@ -305,282 +307,96 @@ export function TasksPage() {
                 Espaces
               </Link>
             </Button>
-            <ThemeToggle />
-            <Separator orientation="vertical" className="hidden h-6 sm:block" />
-            <span className="hidden text-sm text-muted-foreground lg:inline">
-              {username}
-            </span>
-            <Button variant="outline" size="sm" onClick={() => logout()}>
-              <LogOut className="mr-1 h-4 w-4" />
-              Déconnexion
-            </Button>
+            <UserAccountMenu />
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl space-y-6 px-4 py-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              {currentWorkspace?.name ?? "Tâches"}
-            </h1>
-            <p className="mt-1 text-muted-foreground">
-              {count} tâche{count !== 1 ? "s" : ""} · tri{" "}
-              <span className="font-medium text-foreground">
-                {orderingLabels[ordering]}
-              </span>
-            </p>
-          </div>
-          <Button
-            onClick={() => {
-              setEditing(null)
-              setDialogOpen(true)
-            }}
-            className="shrink-0 gap-2 shadow-md"
-          >
-            <Plus className="h-4 w-4" />
-            Nouvelle tâche
-          </Button>
-        </div>
-
-        <Card className="border-border/60 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div>
-                <CardTitle className="text-lg">Filtres & tri</CardTitle>
-                <CardDescription>
-                  Priorité, statut, assignation — pensé pour le travail en équipe.
-                </CardDescription>
+      <main className="mx-auto max-w-[min(100%,1600px)] space-y-6 px-4 py-6 sm:py-8">
+        {currentWorkspaceId ? (
+          <BacklogObjectivePanel
+            workspaceId={currentWorkspaceId}
+            columns={kanbanColumns}
+            onTasksCreated={() => loadKanbanBoard({ silent: true })}
+          />
+        ) : null}
+        <Card className="overflow-hidden border-border/60 shadow-sm">
+          <ProjectBoardToolbar
+            workspaceName={currentWorkspace?.name ?? "Tâches"}
+            description={currentWorkspace?.description}
+            taskCount={kanbanTasks.length}
+            githubUrl={currentWorkspace?.github_url}
+            onNewTask={() => openNewTask()}
+            searchInput={searchInput}
+            onSearchChange={setSearchInput}
+            filterAssignee={filterAssignee}
+            onFilterAssignee={setFilterAssignee}
+            members={members}
+          />
+          <CardContent className="border-t border-border/40 bg-muted/15 p-4 sm:p-5">
+            {kanbanLoading ? (
+              <div className="flex gap-4 overflow-hidden">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton
+                    key={i}
+                    className="h-[min(420px,50vh)] w-[300px] shrink-0 rounded-xl"
+                  />
+                ))}
               </div>
-              <div className="flex flex-wrap gap-3">
-                <div className="w-[200px]">
-                  <Select
-                    value={ordering}
-                    onValueChange={(v) => setOrdering(v as TaskOrdering)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Tri" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(orderingLabels) as TaskOrdering[]).map(
-                        (k) => (
-                          <SelectItem key={k} value={k}>
-                            {orderingLabels[k]}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="w-[150px]">
-                  <Select
-                    value={filterStatus}
-                    onValueChange={(v) => setFilterStatus(v as TaskStatus | "all")}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Tous statuts</SelectItem>
-                      <SelectItem value="todo">À faire</SelectItem>
-                      <SelectItem value="in_progress">En cours</SelectItem>
-                      <SelectItem value="done">Terminé</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="w-[150px]">
-                  <Select
-                    value={filterPriority}
-                    onValueChange={(v) =>
-                      setFilterPriority(v as TaskPriority | "all")
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Toutes prio.</SelectItem>
-                      <SelectItem value="low">Basse</SelectItem>
-                      <SelectItem value="medium">Moyenne</SelectItem>
-                      <SelectItem value="high">Haute</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="w-[180px]">
-                  <Select
-                    value={filterAssignee}
-                    onValueChange={setFilterAssignee}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Assigné" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Tous les assignés</SelectItem>
-                      <SelectItem value="unassigned">Non assigné</SelectItem>
-                      {members.map((m) => (
-                        <SelectItem
-                          key={m.id}
-                          value={String(m.user.id)}
-                        >
-                          {m.user.username}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-          </CardHeader>
-          <Separator />
-          <CardContent className="p-0">
-            <Tabs defaultValue="cards" className="w-full">
-              <div className="flex items-center justify-between border-b px-4 py-2">
-                <TabsList className="h-8">
-                  <TabsTrigger value="cards" className="gap-1 text-xs">
-                    <LayoutGrid className="h-3.5 w-3.5" />
-                    Cartes
-                  </TabsTrigger>
-                </TabsList>
-              </div>
-              <ScrollArea className="min-h-[320px] max-h-[calc(100vh-24rem)]">
-                <div className="p-4">
-                  {loading ? (
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      {[1, 2, 3, 4, 5, 6].map((i) => (
-                        <Skeleton key={i} className="h-40 rounded-xl" />
-                      ))}
-                    </div>
-                  ) : tasks.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 text-center">
-                      <p className="text-lg font-medium">Aucune tâche</p>
-                      <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                        Créez une tâche assignée à un coéquipier ou ajustez filtres / tri.
-                      </p>
-                      <Button
-                        className="mt-6"
-                        onClick={() => {
-                          setEditing(null)
-                          setDialogOpen(true)
-                        }}
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Créer une tâche
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      {tasks.map((t) => (
-                        <Card
-                          key={t.id}
-                          className="group border-border/60 transition-shadow hover:shadow-md"
-                        >
-                          <CardHeader className="space-y-2 pb-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <CardTitle className="line-clamp-2 text-base leading-snug">
-                                {t.title}
-                              </CardTitle>
-                              <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  onClick={() => {
-                                    setEditing(t)
-                                    setDialogOpen(true)
-                                  }}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-destructive hover:text-destructive"
-                                  onClick={() => setDeleteTarget(t)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Badge variant={statusVariant(t.status)}>
-                                {statusLabel[t.status]}
-                              </Badge>
-                              <Badge variant={priorityVariant(t.priority)}>
-                                {priorityLabel[t.priority]}
-                              </Badge>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="space-y-3 pb-4 pt-0">
-                            {t.description ? (
-                              <p className="line-clamp-3 text-sm text-muted-foreground">
-                                {t.description}
-                              </p>
-                            ) : null}
-                            <div className="flex items-start gap-2 rounded-md bg-muted/50 px-2 py-2 text-xs">
-                              <UserCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                              <div className="space-y-0.5">
-                                <p>
-                                  <span className="text-muted-foreground">
-                                    Assigné :{" "}
-                                  </span>
-                                  <span className="font-medium">
-                                    {t.assignee
-                                      ? `@${t.assignee.username}`
-                                      : "Non assigné"}
-                                  </span>
-                                </p>
-                                <p className="text-muted-foreground">
-                                  Créé par @{t.created_by.username}
-                                </p>
-                              </div>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              Créée : {formatDate(t.created_at)}
-                              <br />
-                              Échéance : {formatDate(t.due_date)}
-                            </p>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-            </Tabs>
+            ) : (
+              <KanbanBoard
+                workspaceId={currentWorkspaceId}
+                workspaceName={currentWorkspace?.name}
+                columns={kanbanColumns}
+                tasks={kanbanTasks}
+                selectedTaskId={
+                  taskModalOpen ? modalTask?.id ?? null : null
+                }
+                onPersistOrder={handleKanbanReorder}
+                onOpenTask={openTaskModal}
+                onAddTask={(columnId) => openNewTask(columnId)}
+                canManageColumns={canManageBoardColumns}
+                onRequestAddColumn={() => setAddColumnOpen(true)}
+              />
+            )}
           </CardContent>
         </Card>
-
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {page} / {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
       </main>
 
       <TaskFormDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open)
+          if (!open) setCreateDefaults(null)
+        }}
         task={editing}
         members={members}
+        defaultColumnId={createDefaults?.columnId}
         onSave={handleSave}
+      />
+
+      <AddBoardColumnDialog
+        open={addColumnOpen}
+        onOpenChange={setAddColumnOpen}
+        onSubmit={handleCreateBoardColumn}
+      />
+
+      <TaskModal
+        open={taskModalOpen}
+        onOpenChange={(o) => {
+          setTaskModalOpen(o)
+          if (!o) setModalTask(null)
+        }}
+        task={modalTask}
+        workspaceId={currentWorkspaceId}
+        onUpdated={async () => {
+          await loadKanbanBoard({ silent: true })
+        }}
+        onEdit={(t) => {
+          setEditing(t)
+          setDialogOpen(true)
+        }}
+        onDelete={(t) => setDeleteTarget(t)}
       />
 
       <AlertDialog
