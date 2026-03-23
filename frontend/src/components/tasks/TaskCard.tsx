@@ -1,7 +1,16 @@
-import type { CSSProperties } from "react"
-import { AlertTriangle, Calendar, CheckCircle2, GripVertical, Lock } from "lucide-react"
+import type { CSSProperties, ReactNode } from "react"
+import {
+  AlertTriangle,
+  Calendar,
+  CheckCircle2,
+  ChevronDown,
+  GripVertical,
+  Link2,
+  Plus,
+} from "lucide-react"
 import { UserAvatar } from "@/components/UserAvatar"
 import { getDueUrgency } from "@/lib/dueDateUrgency"
+import type { DependantMarker } from "@/lib/dependantMarkers"
 import type { Task, TaskPriority, TaskStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -36,6 +45,25 @@ function priorityPill(p: TaskPriority): { label: string; className: string } {
   }
 }
 
+function BlockedPadlockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  )
+}
+
 function formatDue(iso: string | null) {
   if (!iso) return null
   return new Date(iso).toLocaleString("fr-FR", {
@@ -60,7 +88,17 @@ export type TaskCardProps = {
   displayStatus?: TaskStatus
   /** Kanban : pied de carte = nom + couleur de la colonne (plus fidèle que le statut grossier) */
   displayColumn?: { name: string; color: string }
+  /** Cartes qui listent cette tâche en prérequis (ex. UC-01) — utile hors colonne du parent. */
+  dependantMarkers?: DependantMarker[]
   onOpen?: () => void
+  /** Panneau UC : replier / déplier les tâches liées (depends_on). */
+  ucExpand?: {
+    expanded: boolean
+    onToggle: () => void
+    depCount: number
+  }
+  /** Contenu sous la carte (ex. liste imbriquée sortable) — rendu par le parent Kanban. */
+  children?: ReactNode
 }
 
 export function TaskCard({
@@ -75,7 +113,10 @@ export function TaskCard({
   workspaceName,
   displayStatus,
   displayColumn,
+  dependantMarkers,
   onOpen,
+  ucExpand,
+  children,
 }: TaskCardProps) {
   const footerStatus = displayStatus ?? task.status
   const due = formatDue(task.due_date)
@@ -96,6 +137,9 @@ export function TaskCard({
     dependsOn.length > 0
       ? dependsOn.map((d) => d.title).join(" · ")
       : ""
+  const showDependsSummary =
+    Boolean(dependsLine) &&
+    !(ucExpand?.expanded && dependsOn.length > 0)
   const progressPct =
     subs > 0 ? Math.min(100, Math.round((0 / subs) * 100)) : 0
 
@@ -105,7 +149,6 @@ export function TaskCard({
       className={cn(
         "group rounded-xl border border-border/70 bg-card text-card-foreground shadow-sm shadow-black/[0.05] transition-[box-shadow,transform,ring,opacity] duration-200",
         "hover:border-border hover:shadow-md",
-        isBlocked && "border-amber-500/35 opacity-[0.92]",
         selected &&
           "ring-2 ring-primary ring-offset-2 ring-offset-background dark:ring-offset-background",
         isDropTarget &&
@@ -116,15 +159,45 @@ export function TaskCard({
       )}
     >
       <div className="flex gap-2 p-3">
-        <button
-          type="button"
-          className="mt-0.5 shrink-0 cursor-grab touch-none rounded border border-transparent p-0.5 text-muted-foreground opacity-60 transition-opacity hover:border-border hover:bg-muted/60 hover:opacity-100 active:cursor-grabbing"
-          aria-label="Glisser la tâche"
-          {...dragAttributes}
-          {...dragListeners}
-        >
-          <GripVertical className="h-4 w-4" />
-        </button>
+        <div className="mt-0.5 flex shrink-0 flex-col items-center gap-1">
+          <button
+            type="button"
+            className="cursor-grab touch-none rounded border border-transparent p-0.5 text-muted-foreground opacity-60 transition-opacity hover:border-border hover:bg-muted/60 hover:opacity-100 active:cursor-grabbing"
+            aria-label="Glisser la tâche"
+            {...dragAttributes}
+            {...dragListeners}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+          {ucExpand ? (
+            <button
+              type="button"
+              disabled={ucExpand.depCount === 0}
+              className={cn(
+                "rounded border border-border/60 bg-muted/40 p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                ucExpand.depCount === 0 && "cursor-not-allowed opacity-40"
+              )}
+              aria-expanded={ucExpand.expanded}
+              aria-label={
+                ucExpand.depCount === 0
+                  ? "Aucune dépendance"
+                  : ucExpand.expanded
+                    ? "Masquer les tâches liées"
+                    : `Afficher les ${ucExpand.depCount} tâche${ucExpand.depCount > 1 ? "s" : ""} liées`
+              }
+              onClick={(e) => {
+                e.stopPropagation()
+                ucExpand.onToggle()
+              }}
+            >
+              {ucExpand.expanded ? (
+                <ChevronDown className="h-4 w-4" aria-hidden />
+              ) : (
+                <Plus className="h-4 w-4" aria-hidden />
+              )}
+            </button>
+          ) : null}
+        </div>
         <div className="min-w-0 flex-1 space-y-2">
           <p
             className="truncate font-mono text-[11px] leading-none text-muted-foreground"
@@ -139,6 +212,26 @@ export function TaskCard({
           >
             {task.title}
           </button>
+          {dependantMarkers && dependantMarkers.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="sr-only">Liée comme prérequis à :</span>
+              {dependantMarkers.map((m) => (
+                <span
+                  key={m.parentTaskId}
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-violet-900/40 bg-violet-200 px-2 py-1 font-mono text-[11px] font-bold leading-none text-violet-950 shadow-sm dark:border-violet-300/50 dark:bg-violet-950 dark:text-zinc-50"
+                  title={m.parentTitle}
+                >
+                  <Link2
+                    className="h-3 w-3 shrink-0 text-violet-800 dark:text-violet-200"
+                    aria-hidden
+                  />
+                  <span className="min-w-0 truncate text-violet-950 dark:text-zinc-50">
+                    {m.label}
+                  </span>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-1.5">
             <span
               className={cn(
@@ -150,15 +243,12 @@ export function TaskCard({
             </span>
             {isBlocked ? (
               <span
-                className="inline-flex max-w-full items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-100"
+                className="inline-flex shrink-0 text-muted-foreground"
                 title={blockedTooltip}
+                role="img"
+                aria-label={blockedTooltip}
               >
-                <Lock className="h-3 w-3 shrink-0" aria-hidden />
-                <span className="truncate">
-                  Bloquée par {blockingTitles.length || dependsOn.length}{" "}
-                  tâche
-                  {(blockingTitles.length || dependsOn.length) > 1 ? "s" : ""}
-                </span>
+                <BlockedPadlockIcon className="h-3.5 w-3.5" />
               </span>
             ) : dependsOn.length > 0 ? (
               <span
@@ -204,7 +294,7 @@ export function TaskCard({
               </div>
             </div>
             ) : null}
-          {dependsLine ? (
+          {showDependsSummary ? (
             <p
               className="text-[10px] leading-snug text-muted-foreground line-clamp-2"
               title={`Dépend de : ${dependsLine}`}
@@ -293,6 +383,9 @@ export function TaskCard({
           </div>
         </div>
       </div>
+      {children ? (
+        <div className="border-t border-border/50 px-3 pb-3 pt-0">{children}</div>
+      ) : null}
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { WorkspaceProvider } from "@/context/WorkspaceContext"
 import { LoginPage } from "@/pages/LoginPage"
 import { RegisterPage } from "@/pages/RegisterPage"
 import { TasksPage } from "@/pages/TasksPage"
+import { LinkUcMappingsPage } from "@/pages/LinkUcMappingsPage"
 import { UcCreationHelpPage } from "@/pages/UcCreationHelpPage"
 import { WorkspacesPage } from "@/pages/WorkspacesPage"
 import { useAuth } from "@/context/AuthContext"
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="/" element={<TasksPage />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/aide-creation-uc" element={<UcCreationHelpPage />} />
+        <Route path="/lier-uc-taches" element={<LinkUcMappingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

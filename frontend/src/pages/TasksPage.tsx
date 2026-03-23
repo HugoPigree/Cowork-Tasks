@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
-import { CheckSquare2, Settings2, Sparkles } from "lucide-react"
+import { CheckSquare2, Link2, Settings2, Sparkles } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -357,6 +357,12 @@ export function TasksPage() {
               <Link to="/aide-creation-uc" className="gap-1">
                 <Sparkles className="h-4 w-4" />
                 Aide UC
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/lier-uc-taches" className="gap-1">
+                <Link2 className="h-4 w-4" />
+                Lier UC
               </Link>
             </Button>
             <Button variant="outline" size="sm" asChild>

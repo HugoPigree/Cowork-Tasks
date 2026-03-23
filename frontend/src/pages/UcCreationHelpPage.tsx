@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Loader2,
   Settings2,
+  Link2,
   Sparkles,
   Trash2,
   Upload,
@@ -63,7 +64,7 @@ const STEPS = [
   {
     title: "3. Importer dans le backlog",
     detail:
-      "Collez le JSON, cliquez sur « Prévisualiser et modifier », ajustez chaque UC si besoin, puis « Valider et importer ». Les tâches partent dans la colonne Backlog (ou la première colonne) de l’espace sélectionné.",
+      "Collez le JSON, cliquez sur « Prévisualiser et modifier », ajustez titres, priorités et dépendances (références UC-01, T-1, ou ref optionnel), puis « Valider et importer ». Les tâches sont créées dans l’ordre des prérequis et les liens « bloquée par » sont posés automatiquement (sans intervention manuelle).",
   },
 ]
 
@@ -299,6 +300,12 @@ export function UcCreationHelpPage() {
               Aide UC
             </Button>
             <Button variant="outline" size="sm" asChild>
+              <Link to="/lier-uc-taches" className="gap-1">
+                <Link2 className="h-4 w-4" />
+                Lier UC
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
               <Link to="/workspaces" className="gap-1">
                 <Settings2 className="h-4 w-4" />
                 Espaces
@@ -346,6 +353,30 @@ export function UcCreationHelpPage() {
                 </li>
               ))}
             </ol>
+            <div className="rounded-lg border border-primary/25 bg-primary/[0.06] px-4 py-3 text-sm">
+              <p className="font-semibold text-foreground">
+                Dépendances : pas besoin d’IDs ni d’import en deux temps
+              </p>
+              <p className="mt-2 leading-relaxed text-muted-foreground">
+                Le champ{" "}
+                <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                  dependencies
+                </code>{" "}
+                du JSON utilise des repères du même tableau (ex.{" "}
+                <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                  UC-01
+                </code>
+                ,{" "}
+                <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                  T-2
+                </code>
+                ), pas des numéros de tâche en base. Au moment de « Valider et
+                importer », l’application en déduit l’ordre (d’abord les
+                prérequis), crée les tâches puis enregistre les dépendances avec
+                les vrais IDs — vous n’avez pas à les ajouter à la main après
+                coup.
+              </p>
+            </div>
             {currentWorkspaceId ? (
               <p className="text-sm text-muted-foreground">
                 {columnsLoading ? (
@@ -427,9 +458,10 @@ export function UcCreationHelpPage() {
                 </>
               ) : (
                 <>
-                  Vérifiez le titre, la description et la priorité de chaque UC.
-                  Retournez au JSON pour tout reprendre, ou validez pour créer
-                  les tâches dans le backlog.
+                  Vérifiez le titre, la description, la priorité et les
+                  dépendances (références séparées par des virgules). Retournez
+                  au JSON pour tout reprendre, ou validez pour créer les tâches
+                  dans le backlog.
                 </>
               )}
             </CardDescription>
@@ -566,6 +598,52 @@ export function UcCreationHelpPage() {
                             <SelectItem value="Basse">Basse</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`uc-ref-${index}`}>
+                          Référence optionnelle (JSON{" "}
+                          <code className="rounded bg-muted px-1 text-[11px]">
+                            ref
+                          </code>
+                          )
+                        </Label>
+                        <Input
+                          id={`uc-ref-${index}`}
+                          placeholder="ex. T-01 (pour lier les dependencies)"
+                          value={uc.ref ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value.trim()
+                            updatePreviewItem(index, {
+                              ref: v === "" ? undefined : v,
+                            })
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`uc-deps-${index}`}>
+                          Dépendances (références, séparées par virgule)
+                        </Label>
+                        <Input
+                          id={`uc-deps-${index}`}
+                          placeholder="ex. UC-01, T-02, T-03"
+                          value={uc.dependencies.join(", ")}
+                          onChange={(e) => {
+                            const next = e.target.value
+                              .split(/[,;]/)
+                              .map((s) => s.trim())
+                              .filter(Boolean)
+                            updatePreviewItem(index, { dependencies: next })
+                          }}
+                        />
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          Utilisez le code titre d’une autre UC (ex.{" "}
+                          <span className="font-mono">UC-01</span>), la position{" "}
+                          <span className="font-mono">T-1</span>…
+                          <span className="font-mono">T-{previewItems.length}</span>
+                          , ou une <span className="font-mono">ref</span> définie
+                          ci-dessus. La validation détecte les références invalides
+                          et les cycles.
+                        </p>
                       </div>
                     </div>
                   ))}

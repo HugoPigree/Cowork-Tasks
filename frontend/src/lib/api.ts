@@ -262,6 +262,8 @@ export const tasksApi = {
     sprint_id?: number | null
     board_column_id?: number
     estimate?: number | null
+    /** Prérequis déjà créés dans le même espace (import UC en ordre topologique). */
+    depends_on_ids?: number[]
   }) => apiFetch<Task>("/api/tasks/", { method: "POST", json: body }),
   patch: (
     id: number,

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import {
   useCallback,
   useEffect,
@@ -30,15 +31,40 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Plus } from "lucide-react"
+import { GripVertical, Link2, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { TaskCard } from "@/components/tasks/TaskCard"
 import { Button } from "@/components/ui/button"
-import type { BoardColumn, Task, TaskReorderItem } from "@/lib/types"
+import type { DependantMarker } from "@/lib/dependantMarkers"
+import { buildDependantMarkers } from "@/lib/dependantMarkers"
+import type { BoardColumn, Task, TaskDependsOnBrief, TaskReorderItem } from "@/lib/types"
+import { isUcTitle } from "@/lib/ucKanban"
 import { cn } from "@/lib/utils"
 
 /** Évite toute collision d’id entre une tâche et une colonne (même id numérique). */
 const COL_PREFIX = "col:"
+/** Prérequis sous une carte parent : id distinct du Kanban racine (évite conflit dnd-kit). */
+const NEST_PREFIX = "nest:"
+
+function nestedSortableId(parentTaskId: number | string, depTaskId: number | string): string {
+  return `${NEST_PREFIX}${parentTaskId}:${depTaskId}`
+}
+
+function parseNestedSortableId(id: string): { parentId: string; taskId: string } | null {
+  if (!id.startsWith(NEST_PREFIX)) return null
+  const rest = id.slice(NEST_PREFIX.length)
+  const colon = rest.indexOf(":")
+  if (colon < 0) return null
+  const parentId = rest.slice(0, colon)
+  const taskId = rest.slice(colon + 1)
+  if (!/^\d+$/.test(parentId) || !/^\d+$/.test(taskId)) return null
+  return { parentId, taskId }
+}
+
+function canonicalTaskIdForDnd(id: string): string {
+  const parsed = parseNestedSortableId(id)
+  return parsed ? parsed.taskId : id
+}
 
 function columnDroppableId(columnId: number): string {
   return `${COL_PREFIX}${columnId}`
@@ -125,7 +151,7 @@ function resolveOverColumnId(
   if (isColumnDroppableId(overId)) {
     return parseColumnDroppableId(overId)
   }
-  return taskContainer(String(overId), buckets)
+  return taskContainer(canonicalTaskIdForDnd(String(overId)), buckets)
 }
 
 function createKanbanCollisionDetection(
@@ -158,9 +184,10 @@ function createKanbanCollisionDetection(
 function applyDragOverMove(
   prev: Record<number, string[]>,
   columnIds: number[],
-  activeIdStr: string,
+  activeRaw: string,
   overId: UniqueIdentifier
 ): Record<number, string[]> | null {
+  const activeIdStr = canonicalTaskIdForDnd(activeRaw)
   const activeCol = taskContainer(activeIdStr, prev)
   if (activeCol === null) return null
 
@@ -173,11 +200,11 @@ function applyDragOverMove(
     overCol = parsed
     overIndexInCol = prev[overCol]?.length ?? 0
   } else {
-    const overStr = String(overId)
-    const oc = taskContainer(overStr, prev)
+    const overCanon = canonicalTaskIdForDnd(String(overId))
+    const oc = taskContainer(overCanon, prev)
     if (oc === null) return null
     overCol = oc
-    overIndexInCol = prev[overCol].indexOf(overStr)
+    overIndexInCol = prev[overCol].indexOf(overCanon)
     if (overIndexInCol < 0) return null
   }
 
@@ -198,7 +225,8 @@ function applyDragOverMove(
       return next
     }
 
-    const newIndex = list.indexOf(String(overId))
+    const overCanon = canonicalTaskIdForDnd(String(overId))
+    const newIndex = list.indexOf(overCanon)
     if (newIndex < 0 || oldIndex === newIndex) return null
     next[activeCol] = arrayMove(list, oldIndex, newIndex)
     return next
@@ -210,7 +238,8 @@ function applyDragOverMove(
   if (isColumnDroppableId(overId)) {
     insertAt = dest.length
   } else {
-    const idx = dest.indexOf(String(overId))
+    const overCanon = canonicalTaskIdForDnd(String(overId))
+    const idx = dest.indexOf(overCanon)
     insertAt = idx >= 0 ? idx : dest.length
   }
   insertAt = Math.min(insertAt, dest.length)
@@ -221,14 +250,18 @@ function applyDragOverMove(
 
 function KanbanColumn({
   column,
-  items,
+  columnTaskIds,
+  rootSortableIds,
   children,
   onAddCard,
   isHighlighted,
 }: {
   column: BoardColumn
-  items: string[]
-  children: React.ReactNode
+  /** Tous les IDs dans la colonne (ordre bucket, pour WIP / message vide). */
+  columnTaskIds: string[]
+  /** IDs rendus au niveau racine du SortableContext (sans les T masquées sous UC). */
+  rootSortableIds: string[]
+  children: ReactNode
   onAddCard?: (columnId: number) => void
   /** Survol actif (collision) pendant un drag */
   isHighlighted: boolean
@@ -238,8 +271,8 @@ function KanbanColumn({
   })
   const wip = column.wip_limit
   const countLabel =
-    wip != null ? `${items.length} / ${wip}` : String(items.length)
-  const wipExceeded = wip != null && items.length > wip
+    wip != null ? `${columnTaskIds.length} / ${wip}` : String(columnTaskIds.length)
+  const wipExceeded = wip != null && columnTaskIds.length > wip
   const showGlow = isOver || isHighlighted
 
   return (
@@ -298,15 +331,18 @@ function KanbanColumn({
             "border-primary/45 bg-primary/[0.08] dark:bg-primary/[0.12]"
         )}
       >
-        <SortableContext items={items} strategy={verticalListSortingStrategy}>
+        <SortableContext
+          items={rootSortableIds}
+          strategy={verticalListSortingStrategy}
+        >
           <div
             className={cn(
               "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-3 [scrollbar-width:thin]",
-              items.length === 0 && "min-h-[120px] justify-center"
+              columnTaskIds.length === 0 && "min-h-[120px] justify-center"
             )}
           >
             {children}
-            {items.length === 0 ? (
+            {columnTaskIds.length === 0 ? (
               <p className="py-4 text-center text-xs text-muted-foreground">
                 Aucun item — déposez une carte ou cliquez sur +.
               </p>
@@ -327,6 +363,423 @@ function DropSlotLine() {
   )
 }
 
+function sameColumn(
+  depColId: number | null | undefined,
+  colId: number
+): boolean {
+  if (depColId == null) return false
+  return Number(depColId) === Number(colId)
+}
+
+/**
+ * Colonne réelle d’une dépendance : la liste Kanban (`tasksById`) fait foi
+ * (évite décalages avec le résumé `depends_on` de l’API).
+ */
+function depColumnId(
+  d: { id: number; board_column?: { id: number } | null },
+  tasksById: Map<string, Task>
+): number | undefined {
+  const full = tasksById.get(String(d.id))
+  return full?.board_column?.id ?? d.board_column?.id
+}
+
+/** Carte qui peut regrouper des prérequis dans la même colonne (UC ou toute tâche avec dépendances). */
+function isNestParentTask(task: Task): boolean {
+  return (
+    isUcTitle(task.title) || (task.depends_on?.length ?? 0) > 0
+  )
+}
+
+/**
+ * Prérequis dans la même colonne : masqués de la liste racine et affichés uniquement
+ * sous la carte parent (au clic +), pas seulement quand le panneau est ouvert.
+ */
+function computeNestInfoForColumn(
+  colId: number,
+  colItems: string[],
+  tasksById: Map<string, Task>
+): {
+  hiddenRootIds: Set<string>
+  nestOwnerByDepId: Map<string, string>
+} {
+  const hiddenRootIds = new Set<string>()
+  const nestOwnerByDepId = new Map<string, string>()
+  for (const id of colItems) {
+    const t = tasksById.get(id)
+    if (!t || !isNestParentTask(t)) continue
+    for (const d of t.depends_on ?? []) {
+      const did = String(d.id)
+      if (!sameColumn(depColumnId(d, tasksById), colId)) continue
+      if (!colItems.includes(did)) continue
+      if (nestOwnerByDepId.has(did)) continue
+      nestOwnerByDepId.set(did, id)
+      hiddenRootIds.add(did)
+    }
+  }
+  return { hiddenRootIds, nestOwnerByDepId }
+}
+
+/** Prérequis sous une UC : id sortable `nest:parent:task` pour ne pas entrer en conflit avec la liste racine. */
+function SortableNestedDepRow({
+  task,
+  parentTaskId,
+  onOpen,
+  selected,
+  workspaceName,
+  activeDragId,
+  overId,
+  displayColumn,
+  dependantMarkers,
+}: {
+  task: Task
+  parentTaskId: number
+  onOpen: () => void
+  selected?: boolean
+  workspaceName?: string
+  activeDragId: string | null
+  overId: UniqueIdentifier | null
+  displayColumn: { name: string; color: string }
+  /** Masquer le marqueur du parent sous lequel cette ligne est déjà affichée. */
+  dependantMarkers?: DependantMarker[]
+}) {
+  const sortableId = nestedSortableId(parentTaskId, task.id)
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: sortableId })
+  const hideSource = activeDragId === sortableId || isDragging
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: hideSource || isDragging ? undefined : transition,
+  }
+  const showLineAbove =
+    activeDragId != null &&
+    overId != null &&
+    String(overId) === sortableId &&
+    activeDragId !== sortableId &&
+    !isColumnDroppableId(overId)
+  const isDropTarget =
+    activeDragId != null &&
+    overId != null &&
+    String(overId) === sortableId &&
+    activeDragId !== sortableId
+  const ctx = (workspaceName ?? "Projet").slice(0, 22)
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "relative",
+        hideSource && "pointer-events-none invisible"
+      )}
+      aria-hidden={hideSource}
+    >
+      {showLineAbove ? (
+        <div className="-mt-1 mb-1">
+          <DropSlotLine />
+        </div>
+      ) : null}
+      <div
+        className={cn(
+          "flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 p-2 shadow-sm",
+          selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
+          isDropTarget &&
+            "ring-2 ring-primary/60 ring-offset-1 ring-offset-background"
+        )}
+      >
+        <button
+          type="button"
+          className="mt-0.5 shrink-0 cursor-grab touch-none rounded border border-transparent p-0.5 text-muted-foreground hover:bg-muted/60"
+          aria-label="Glisser la tâche"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="truncate font-mono text-[10px] text-muted-foreground">
+            {ctx} · #{task.id}
+          </p>
+          <button
+            type="button"
+            className="w-full text-left text-xs font-semibold leading-snug text-foreground hover:underline"
+            onClick={onOpen}
+          >
+            {task.title}
+          </button>
+          {dependantMarkers && dependantMarkers.length > 0 ? (
+            <div className="flex flex-wrap gap-0.5">
+              {dependantMarkers.map((m) => (
+                <span
+                  key={m.parentTaskId}
+                  className="inline-flex max-w-full items-center gap-1 rounded border border-violet-900/40 bg-violet-200 px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-violet-950 shadow-sm dark:border-violet-300/50 dark:bg-violet-950 dark:text-zinc-50"
+                  title={m.parentTitle}
+                >
+                  <Link2
+                    className="h-2.5 w-2.5 shrink-0 text-violet-800 dark:text-violet-200"
+                    aria-hidden
+                  />
+                  <span className="min-w-0 truncate text-violet-950 dark:text-zinc-50">
+                    {m.label}
+                  </span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div className="flex items-center gap-1.5">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full shadow-[0_0_0_1px_rgba(0,0,0,0.08)]"
+              style={{ backgroundColor: displayColumn.color }}
+              aria-hidden
+            />
+            <span className="truncate text-[10px] text-muted-foreground">
+              {displayColumn.name}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function UcForeignDepsLines({
+  task,
+  colId,
+  colItems,
+  nestOwnerByDepId,
+  tasksById,
+  onOpenTask,
+}: {
+  task: Task
+  colId: number
+  colItems: string[]
+  nestOwnerByDepId: Map<string, string>
+  tasksById: Map<string, Task>
+  onOpenTask: (t: Task) => void
+}) {
+  const lines: {
+    dep: TaskDependsOnBrief
+    full: Task
+    subtitle: string
+  }[] = []
+
+  for (const d of task.depends_on ?? []) {
+    const sid = String(d.id)
+    const full = tasksById.get(sid)
+    if (!full) continue
+    const owner = nestOwnerByDepId.get(sid)
+    if (owner === String(task.id)) continue
+    // Déjà affichée sous une autre UC de cette colonne : ne pas dupliquer dans « Autres prérequis ».
+    if (
+      sameColumn(full.board_column.id, colId) &&
+      colItems.includes(sid) &&
+      owner &&
+      owner !== String(task.id)
+    ) {
+      continue
+    }
+    if (!sameColumn(full.board_column.id, colId)) {
+      lines.push({
+        dep: d,
+        full,
+        subtitle: `Colonne : ${full.board_column.name}`,
+      })
+    }
+  }
+
+  if (lines.length === 0) return null
+
+  return (
+    <div className="space-y-1.5 border-t border-border/40 pt-2">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        Autres prérequis
+      </p>
+      <ul className="space-y-1">
+        {lines.map(({ dep, full, subtitle }) => (
+          <li key={String(dep.id)}>
+            <button
+              type="button"
+              className="w-full rounded-md border border-border/50 bg-background/80 px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-muted/50"
+              onClick={() => onOpenTask(full)}
+            >
+              <span className="line-clamp-2 font-medium text-foreground">
+                {dep.title}
+              </span>
+              <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                {subtitle}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function SortableUcTaskRow({
+  task,
+  columnId,
+  colItems,
+  nestOwnerByDepId,
+  tasksById,
+  expanded,
+  onToggle,
+  onOpen,
+  onOpenDep,
+  selected,
+  selectedTaskId,
+  workspaceName,
+  activeDragId,
+  overId,
+  isFirstInColumn,
+  displayColumn,
+  dependantMarkers,
+  markersByTaskId,
+}: {
+  task: Task
+  columnId: number
+  colItems: string[]
+  nestOwnerByDepId: Map<string, string>
+  tasksById: Map<string, Task>
+  expanded: boolean
+  onToggle: () => void
+  onOpen: () => void
+  onOpenDep: (t: Task) => void
+  selected?: boolean
+  selectedTaskId?: number | null
+  workspaceName?: string
+  activeDragId: string | null
+  overId: UniqueIdentifier | null
+  isFirstInColumn: boolean
+  displayColumn: { name: string; color: string }
+  dependantMarkers?: DependantMarker[]
+  markersByTaskId: Map<string, DependantMarker[]>
+}) {
+  const idStr = String(task.id)
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: idStr })
+  const hideSource =
+    (activeDragId != null &&
+      canonicalTaskIdForDnd(activeDragId) === idStr) ||
+    isDragging
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: hideSource || isDragging ? undefined : transition,
+  }
+  const showLineAbove =
+    activeDragId != null &&
+    overId != null &&
+    String(overId) === idStr &&
+    activeDragId !== idStr &&
+    !isColumnDroppableId(overId)
+  const isDropTarget =
+    activeDragId != null &&
+    overId != null &&
+    String(overId) === idStr &&
+    activeDragId !== idStr
+
+  const nestedIds = colItems.filter(
+    (tid) => nestOwnerByDepId.get(tid) === idStr
+  )
+  const depCount = task.depends_on?.length ?? 0
+
+  const panel =
+    expanded && depCount > 0 ? (
+      <div className="space-y-2">
+        {nestedIds.length > 0 ? (
+          <div>
+            <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Prérequis dans cette colonne (glisser-déposer)
+            </p>
+            <SortableContext
+              items={nestedIds.map((nid) => nestedSortableId(task.id, nid))}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="flex flex-col gap-1.5">
+                {nestedIds.map((nid) => {
+                  const nt = tasksById.get(nid)
+                  if (!nt) return null
+                  return (
+                    <SortableNestedDepRow
+                      key={nid}
+                      parentTaskId={task.id}
+                      task={nt}
+                      workspaceName={workspaceName}
+                      selected={selectedTaskId === nt.id}
+                      activeDragId={activeDragId}
+                      overId={overId}
+                      displayColumn={displayColumn}
+                      dependantMarkers={(
+                        markersByTaskId.get(nid) ?? []
+                      ).filter((m) => m.parentTaskId !== task.id)}
+                      onOpen={() => onOpenDep(nt)}
+                    />
+                  )
+                })}
+              </div>
+            </SortableContext>
+          </div>
+        ) : null}
+        <UcForeignDepsLines
+          task={task}
+          colId={columnId}
+          colItems={colItems}
+          nestOwnerByDepId={nestOwnerByDepId}
+          tasksById={tasksById}
+          onOpenTask={onOpenDep}
+        />
+      </div>
+    ) : null
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "relative",
+        hideSource && "pointer-events-none invisible"
+      )}
+      aria-hidden={hideSource}
+    >
+      {showLineAbove ? (
+        <div className={cn(!isFirstInColumn && "-mt-1 mb-1")}>
+          <DropSlotLine />
+        </div>
+      ) : null}
+      <TaskCard
+        task={task}
+        workspaceName={workspaceName}
+        displayColumn={displayColumn}
+        dependantMarkers={dependantMarkers}
+        selected={selected}
+        dragAttributes={attributes as unknown as Record<string, unknown>}
+        dragListeners={listeners as unknown as Record<string, unknown>}
+        isDragging={false}
+        isDropTarget={isDropTarget}
+        onOpen={onOpen}
+        ucExpand={{
+          expanded,
+          onToggle,
+          depCount,
+        }}
+      >
+        {panel}
+      </TaskCard>
+    </div>
+  )
+}
+
 function SortableTaskRow({
   task,
   onOpen,
@@ -336,6 +789,7 @@ function SortableTaskRow({
   overId,
   isFirstInColumn,
   displayColumn,
+  dependantMarkers,
 }: {
   task: Task
   onOpen: () => void
@@ -345,6 +799,7 @@ function SortableTaskRow({
   overId: UniqueIdentifier | null
   isFirstInColumn: boolean
   displayColumn: { name: string; color: string }
+  dependantMarkers?: DependantMarker[]
 }) {
   const idStr = String(task.id)
   const {
@@ -358,7 +813,10 @@ function SortableTaskRow({
 
   /* Avec DragOverlay : seule la copie flottante est visible. Masquer la source (y compris après
      saut de colonne, où le nouveau nœud useSortable n’a parfois pas encore `isDragging`). */
-  const hideSource = activeDragId === idStr || isDragging
+  const hideSource =
+    (activeDragId != null &&
+      canonicalTaskIdForDnd(activeDragId) === idStr) ||
+    isDragging
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -398,6 +856,7 @@ function SortableTaskRow({
         task={task}
         workspaceName={workspaceName}
         displayColumn={displayColumn}
+        dependantMarkers={dependantMarkers}
         selected={selected}
         dragAttributes={attributes as unknown as Record<string, unknown>}
         dragListeners={listeners as unknown as Record<string, unknown>}
@@ -448,11 +907,26 @@ export function KanbanBoard({
     return m
   }, [tasks])
 
+  const markersByTaskId = useMemo(
+    () => buildDependantMarkers(tasks),
+    [tasks]
+  )
+
   const [buckets, setBuckets] = useState<Record<number, string[]>>(() =>
     buildColumns(tasks, columnIds)
   )
+  const [expandedUcIds, setExpandedUcIds] = useState(() => new Set<number>())
   const [activeId, setActiveId] = useState<string | null>(null)
   const [overId, setOverId] = useState<UniqueIdentifier | null>(null)
+
+  const toggleUcExpanded = useCallback((taskId: number) => {
+    setExpandedUcIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }, [])
   /** Évite de réécraser `buckets` avec d’anciennes `tasks` avant le refetch API. */
   const dragSessionRef = useRef(false)
 
@@ -568,11 +1042,13 @@ export function KanbanBoard({
     }
   }
 
-  const activeTask = activeId ? tasksById.get(activeId) ?? null : null
+  const activeTask = activeId
+    ? tasksById.get(canonicalTaskIdForDnd(activeId)) ?? null
+    : null
 
   const overlayDisplayColumn = useMemo(() => {
     if (!activeId) return undefined
-    const colId = taskContainer(activeId, buckets)
+    const colId = taskContainer(canonicalTaskIdForDnd(activeId), buckets)
     if (colId == null) return undefined
     const col = columns.find((c) => c.id === colId)
     if (!col) return undefined
@@ -626,10 +1102,19 @@ export function KanbanBoard({
             .sort((a, b) => a.position - b.position || a.id - b.id)
             .map((col, index, arr) => {
               const colItems = buckets[col.id] ?? []
+              const nest = computeNestInfoForColumn(
+                col.id,
+                colItems,
+                tasksById
+              )
+              const rootSortableIds = colItems.filter(
+                (tid) => !nest.hiddenRootIds.has(tid)
+              )
               const showAddSlot = Boolean(
                 canManageColumns && onRequestAddColumn
               )
               const isLastCol = index === arr.length - 1
+              let rootVisualIndex = 0
               return (
                 <div
                   key={col.id}
@@ -641,15 +1126,46 @@ export function KanbanBoard({
                 >
                   <KanbanColumn
                     column={col}
-                    items={colItems}
+                    columnTaskIds={colItems}
+                    rootSortableIds={rootSortableIds}
                     onAddCard={onAddTask}
                     isHighlighted={
                       activeId != null && overColumnId === col.id
                     }
                   >
-                    {colItems.map((id, index) => {
+                    {colItems.map((id) => {
+                      if (nest.hiddenRootIds.has(id)) return null
                       const task = tasksById.get(id)
                       if (!task) return null
+                      const isFirstRoot = rootVisualIndex++ === 0
+                      if (isNestParentTask(task)) {
+                        return (
+                          <SortableUcTaskRow
+                            key={id}
+                            task={task}
+                            columnId={col.id}
+                            colItems={colItems}
+                            nestOwnerByDepId={nest.nestOwnerByDepId}
+                            tasksById={tasksById}
+                            expanded={expandedUcIds.has(task.id)}
+                            onToggle={() => toggleUcExpanded(task.id)}
+                            workspaceName={workspaceName}
+                            selected={selectedTaskId === task.id}
+                            activeDragId={activeId}
+                            overId={overId}
+                            isFirstInColumn={isFirstRoot}
+                            displayColumn={{
+                              name: col.name,
+                              color: col.color,
+                            }}
+                            onOpen={() => onOpenTask(task)}
+                            onOpenDep={onOpenTask}
+                            selectedTaskId={selectedTaskId}
+                            dependantMarkers={markersByTaskId.get(id)}
+                            markersByTaskId={markersByTaskId}
+                          />
+                        )
+                      }
                       return (
                         <SortableTaskRow
                           key={id}
@@ -658,11 +1174,12 @@ export function KanbanBoard({
                           selected={selectedTaskId === task.id}
                           activeDragId={activeId}
                           overId={overId}
-                          isFirstInColumn={index === 0}
+                          isFirstInColumn={isFirstRoot}
                           displayColumn={{
                             name: col.name,
                             color: col.color,
                           }}
+                          dependantMarkers={markersByTaskId.get(id)}
                           onOpen={() => onOpenTask(task)}
                         />
                       )
@@ -696,6 +1213,9 @@ export function KanbanBoard({
             task={activeTask}
             workspaceName={workspaceName}
             displayColumn={overlayDisplayColumn}
+            dependantMarkers={markersByTaskId.get(
+              String(activeTask.id)
+            )}
             isDragging
             className="w-[min(100vw-2rem,280px)] rotate-1 scale-[1.03] cursor-grabbing shadow-2xl"
           />
