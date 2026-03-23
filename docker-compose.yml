@@ -46,7 +46,7 @@ services:
     expose:
       - "8000"
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - media_data:/app/media
     healthcheck:
