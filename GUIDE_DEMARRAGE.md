@@ -75,7 +75,7 @@ Ouvre **http://localhost:5173** pour Vite avec rechargement à chaud.
 | Problème | Piste |
 |----------|--------|
 | Port déjà pris | Change `APP_PORT` / `8000` via un `.env` ou arrête l’autre service. |
-| Pas de page sur 8080 | `docker compose ps` — les services **`app`** et **`web`** doivent être *running* / *healthy*. |
+| Pas de page sur 8080 | `docker compose ps` — les services **`cowork_frontend`** et **`cowork_backend`** doivent être *running* / *healthy*. |
 | API en erreur | Teste `http://localhost:8000/api/health/`. |
 
 Plus de détails : **`README.md`** (section *Quick start (Docker)*).

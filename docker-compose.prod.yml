@@ -1,7 +1,8 @@
 services:
-  web:
+  cowork_backend:
     networks:
       - web
+    ports: []
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.cowork-tasks-backend.rule=Host(`${DOMAIN:-localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || PathPrefix(`/static`) || PathPrefix(`/media`))"
@@ -10,9 +11,10 @@ services:
       - "traefik.http.routers.cowork-tasks-backend.priority=100"
       - "traefik.http.services.cowork-tasks-backend.loadbalancer.server.port=8000"
 
-  app:
+  cowork_frontend:
     networks:
       - web
+    ports: []
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.cowork-tasks-frontend.rule=Host(`${DOMAIN:-localhost}`)"

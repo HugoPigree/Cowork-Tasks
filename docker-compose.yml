@@ -23,12 +23,12 @@ services:
       timeout: 5s
       retries: 10
 
-  web:
+  cowork_backend:
     build: .
     environment:
       SECRET_KEY: ${SECRET_KEY:-cowork-tasks-local-docker-only-change-me-for-any-real-deploy-9f3a2b1c}
       DEBUG: ${DEBUG:-False}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,web,${DOMAIN:-localhost}}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,cowork_backend,${DOMAIN:-localhost}}
       DB_NAME: ${DB_NAME:-taskmanager}
       DB_USER: ${DB_USER:-taskmanager}
       DB_PASSWORD: ${DB_PASSWORD:-coworktasks_local}
@@ -68,7 +68,7 @@ services:
       - default
 
   # Build Vite + nginx — démarre toujours avec `docker compose up` (pas de profil requis).
-  app:
+  cowork_frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -77,7 +77,7 @@ services:
     ports:
       - "${APP_PORT:-8080}:80"
     depends_on:
-      web:
+      cowork_backend:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1/"]
@@ -99,11 +99,11 @@ services:
       - ./frontend:/app
       - frontend_dev_node_modules:/app/node_modules
     environment:
-      VITE_DEV_PROXY_TARGET: http://web:8000
+      VITE_DEV_PROXY_TARGET: http://cowork_backend:8000
     ports:
       - "${DEV_PORT:-5173}:5173"
     depends_on:
-      web:
+      cowork_backend:
         condition: service_healthy
     networks:
       - default

@@ -2,7 +2,7 @@ import path from "path"
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 
-/** In Docker Compose dev, set VITE_DEV_PROXY_TARGET=http://web:8000 */
+/** In Docker Compose dev, set VITE_DEV_PROXY_TARGET=http://cowork_backend:8000 */
 const devApiTarget =
   process.env.VITE_DEV_PROXY_TARGET ?? "http://127.0.0.1:8000"
 

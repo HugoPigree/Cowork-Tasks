@@ -22,7 +22,7 @@ task_manager/
 ├── frontend/              # React + Vite + Dockerfile (nginx + build prod)
 ├── deploy/                # Exemple nginx si tu termines TLS toi-même
 ├── Dockerfile             # Django / Gunicorn
-├── docker-compose.yml     # db + web + app (nginx) ; profil `dev` = Vite HMR
+├── docker-compose.yml     # db + cowork_backend + cowork_frontend (nginx) ; profil `dev` = Vite HMR
 ├── compose-up.cmd         # Windows : raccourci vers docker compose
 ├── scripts/compose-up.sh   # idem (Linux / macOS)
 ├── GUIDE_DEMARRAGE.md     # guide de démarrage (FR)
@@ -97,7 +97,7 @@ Postgres + Django + build Vite + nginx démarrent avec des **valeurs par défaut
 docker compose up --build -d
 ```
 
-Puis ouvre **`http://localhost:8080`** (interface) et **`http://localhost:8000`** (API). Les migrations s’exécutent au démarrage du service `web`.
+Puis ouvre **`http://localhost:8080`** (interface) et **`http://localhost:8000`** (API). Les migrations s’exécutent au démarrage du service `cowork_backend`.
 
 **Production / secrets :** copie **`.env.example`** → **`.env`** et définis **`SECRET_KEY`**, **`DB_PASSWORD`**, etc. Les variables du `.env` **remplacent** les défauts Compose.
 
@@ -105,33 +105,33 @@ Raccourcis : **`compose-up.cmd`** (Windows) ou **`./scripts/compose-up.sh`** —
 
 ### Développement avec HMR (Vite dans Docker, optionnel)
 
-Ajoute le profil **`dev`** pour lancer aussi **`frontend-dev`** (en plus de **`app`**) :
+Ajoute le profil **`dev`** pour lancer aussi **`frontend-dev`** (en plus de **`cowork_frontend`**) :
 
 ```bash
 docker compose --profile dev up --build
 ```
 
-UI HMR : **`http://localhost:5173`**. L’UI nginx reste sur **8080** si tu ne arrêtes pas le service `app`.
+- UI HMR : **`http://localhost:5173`**. L’UI nginx reste sur **8080** si tu ne arrêtes pas le service `cowork_frontend`.
 
 ### Récap des services
 
 | Commande | Services typiques | UI principale |
 |----------|-------------------|---------------|
-| `docker compose up -d` | `db`, `web`, `app` | **`http://localhost:8080`** |
+| `docker compose up -d` | `db`, `cowork_backend`, `cowork_frontend` | **`http://localhost:8080`** |
 | `docker compose --profile dev up` | + `frontend-dev` | **5173** (HMR) + 8080 |
 
 Les builds / `npm run dev` s’exécutent **dans les images** ; Node sur la machine n’est pas requis pour cette stack.
 
 ### Browser shows “invalid response” on localhost?
 
-With **full Compose**, l’app web est sur **`http://localhost:8080`** (ou `APP_PORT`). L’API est aussi joignable **directement** sur **`http://localhost:8000`** (utile avec `npm run dev` sur Vite). Sans TLS devant nginx, reste en **`http://`**.
+With **full Compose**, l’interface frontend est sur **`http://localhost:8080`** (ou `APP_PORT`). L’API est aussi joignable **directement** sur **`http://localhost:8000`** (utile avec `npm run dev` sur Vite). Sans TLS devant nginx, reste en **`http://`**.
 
 ### Sprints : `404` sur `/api/workspaces/<id>/sprints/` ?
 
 L’URL affichée dans l’UI (ex. `/api/workspaces/1/sprints/`) est **correcte** : en dev, Vite proxy envoie ça vers le serveur sur le port **8000**. Un **404** signifie presque toujours que **ce n’est pas** l’instance Django de **ce dépôt** qui répond (autre projet, ancien terminal, image Docker non reconstruite).
 
 - En local : à la racine du repo, `python manage.py migrate` puis redémarrez `runserver`.
-- Docker : `docker compose build web && docker compose up` (ou `--build`) pour inclure le dernier code ; les migrations tournent au démarrage du service `web`.
+- Docker : `docker compose build cowork_backend && docker compose up` (ou `--build`) pour inclure le dernier code ; les migrations tournent au démarrage du service `cowork_backend`.
 
 Quick check (JSON `{"status":"ok"}`) :
 
@@ -414,7 +414,7 @@ pytest
 ## Security notes
 
 - Never commit `.env`; use `.env.example` as a template.
-- The `Dockerfile` sets `DEBUG=False` by default; Compose also passes `DEBUG=False` to the web service.
+- The `Dockerfile` sets `DEBUG=False` by default; Compose also passes `DEBUG=False` to the cowork_backend service.
 - JWT secret is derived from `SECRET_KEY`; use a strong, unique value in production.
 
 ## License
