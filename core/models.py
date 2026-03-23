@@ -84,6 +84,32 @@ class WorkspaceMembership(models.Model):
         return f"{self.user_id} @ {self.workspace_id} ({self.role})"
 
 
+class Sprint(models.Model):
+    """Time-boxed iteration (Scrum-style) within a workspace; tasks optionally belong to one sprint."""
+
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name="sprints",
+    )
+    name = models.CharField(max_length=100)
+    color = models.CharField(
+        max_length=7,
+        default="#6366f1",
+        help_text="Hex color for UI badges (e.g. #6366f1).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["workspace", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} (ws={self.workspace_id})"
+
+
 class Task(models.Model):
     """Task scoped to a workspace; assignee is optional (backlog / unassigned)."""
 
@@ -100,6 +126,13 @@ class Task(models.Model):
     workspace = models.ForeignKey(
         Workspace,
         on_delete=models.CASCADE,
+        related_name="tasks",
+    )
+    sprint = models.ForeignKey(
+        Sprint,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="tasks",
     )
     parent = models.ForeignKey(
@@ -166,6 +199,7 @@ class Task(models.Model):
             models.Index(fields=["workspace", "priority"]),
             models.Index(fields=["workspace", "assignee"]),
             models.Index(fields=["workspace", "parent"]),
+            models.Index(fields=["workspace", "sprint"]),
         ]
 
     def save(self, *args, **kwargs):

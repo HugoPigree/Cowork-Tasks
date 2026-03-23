@@ -27,7 +27,8 @@ function priorityPill(p: TaskPriority): { label: string; className: string } {
   if (p === "medium")
     return {
       label: "Priorité moyenne",
-      className: "border border-primary/30 bg-primary/10 text-primary",
+      className:
+        "border border-border/90 bg-muted/70 text-foreground/80 dark:bg-muted/50 dark:text-foreground/75",
     }
   return {
     label: "Priorité basse",
@@ -102,7 +103,7 @@ export function TaskCard({
     <div
       style={style}
       className={cn(
-        "group rounded-md border border-border/80 bg-card text-card-foreground shadow-sm transition-[box-shadow,transform,ring,opacity] duration-200",
+        "group rounded-xl border border-border/70 bg-card text-card-foreground shadow-sm shadow-black/[0.05] transition-[box-shadow,transform,ring,opacity] duration-200",
         "hover:border-border hover:shadow-md",
         isBlocked && "border-amber-500/35 opacity-[0.92]",
         selected &&
@@ -171,6 +172,19 @@ export function TaskCard({
             {subs > 0 ? (
               <span className="rounded-full border border-border bg-muted/30 px-2 py-0.5 text-[11px] text-muted-foreground">
                 {subs} sous-tâche{subs > 1 ? "s" : ""}
+              </span>
+            ) : null}
+            {task.sprint ? (
+              <span
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-muted/35 px-2 py-0.5 text-[11px] font-medium text-foreground"
+                title={task.sprint.name}
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/15"
+                  style={{ backgroundColor: task.sprint.color }}
+                  aria-hidden
+                />
+                <span className="truncate">{task.sprint.name}</span>
               </span>
             ) : null}
           </div>

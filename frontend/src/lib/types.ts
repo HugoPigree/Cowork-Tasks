@@ -19,6 +19,14 @@ export interface UserBrief {
   avatar?: string
 }
 
+/** Sprint (itération) dans un espace — couleur pour badges Kanban. */
+export interface Sprint {
+  id: number
+  name: string
+  color: string
+  created_at: string
+}
+
 export interface Workspace {
   id: number
   name: string
@@ -86,6 +94,8 @@ export interface Task {
   position: number
   subtask_count: number
   board_column: BoardColumn
+  /** Sprint optionnel (une seule par tâche). */
+  sprint: Pick<Sprint, "id" | "name" | "color"> | null
   estimate: number | null
   created_at: string
   due_date: string | null

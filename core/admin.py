@@ -4,6 +4,7 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from core.models import (
     Board,
     BoardColumn,
+    Sprint,
     Task,
     TaskComment,
     User,
@@ -36,6 +37,12 @@ class BoardColumnAdmin(admin.ModelAdmin):
     list_filter = ("maps_to_status",)
 
 
+@admin.register(Sprint)
+class SprintAdmin(admin.ModelAdmin):
+    list_display = ("name", "workspace", "color", "created_at")
+    list_filter = ("workspace",)
+
+
 @admin.register(Workspace)
 class WorkspaceAdmin(admin.ModelAdmin):
     list_display = ("name", "created_by", "created_at")
@@ -53,6 +60,7 @@ class TaskAdmin(admin.ModelAdmin):
     list_display = (
         "title",
         "workspace",
+        "sprint",
         "parent",
         "assignee",
         "created_by",
@@ -62,7 +70,7 @@ class TaskAdmin(admin.ModelAdmin):
         "created_at",
         "due_date",
     )
-    list_filter = ("status", "priority", "workspace")
+    list_filter = ("status", "priority", "workspace", "sprint")
     search_fields = ("title", "workspace__name", "assignee__username")
 
 

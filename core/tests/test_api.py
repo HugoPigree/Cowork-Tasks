@@ -6,7 +6,13 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from core.models import Task, Workspace, WorkspaceMembership, ensure_workspace_board
+from core.models import (
+    Sprint,
+    Task,
+    Workspace,
+    WorkspaceMembership,
+    ensure_workspace_board,
+)
 
 User = get_user_model()
 
@@ -473,3 +479,63 @@ def test_objectives_generate_unknown_400(api_client, user_a):
         format="json",
     )
     assert r.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+def test_sprint_crud_and_task_filter(api_client, user_a, workspace_a):
+    api_client.force_authenticate(user=user_a)
+    empty = api_client.get(f"/api/workspaces/{workspace_a.id}/sprints/")
+    assert empty.status_code == status.HTTP_200_OK
+    assert empty.data == []
+
+    create_sp = api_client.post(
+        f"/api/workspaces/{workspace_a.id}/sprints/",
+        {"name": "Sprint 1", "color": "#22c55e"},
+        format="json",
+    )
+    assert create_sp.status_code == status.HTTP_201_CREATED
+    sp_id = create_sp.data["id"]
+    assert create_sp.data["name"] == "Sprint 1"
+
+    task_r = api_client.post(
+        "/api/tasks/",
+        {
+            "workspace": workspace_a.id,
+            "title": "In sprint",
+            "status": Task.Status.TODO,
+            "priority": Task.Priority.MEDIUM,
+            "sprint_id": sp_id,
+        },
+        format="json",
+    )
+    assert task_r.status_code == status.HTTP_201_CREATED
+    tid = task_r.data["id"]
+    assert task_r.data["sprint"]["id"] == sp_id
+
+    list_all = api_client.get(
+        "/api/tasks/",
+        {"workspace": workspace_a.id, "root_only": "true", "page_size": 50},
+    )
+    assert list_all.status_code == status.HTTP_200_OK
+    assert len(list_all.data["results"]) >= 1
+
+    list_sp = api_client.get(
+        "/api/tasks/",
+        {
+            "workspace": workspace_a.id,
+            "root_only": "true",
+            "page_size": 50,
+            "sprint": str(sp_id),
+        },
+    )
+    assert list_sp.status_code == status.HTTP_200_OK
+    ids = [t["id"] for t in list_sp.data["results"]]
+    assert tid in ids
+
+    del_sp = api_client.delete(
+        f"/api/workspaces/{workspace_a.id}/sprints/{sp_id}/",
+    )
+    assert del_sp.status_code == status.HTTP_204_NO_CONTENT
+    assert not Sprint.objects.filter(pk=sp_id).exists()
+    t = Task.objects.get(pk=tid)
+    assert t.sprint_id is None

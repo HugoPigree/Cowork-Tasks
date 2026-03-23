@@ -1,4 +1,6 @@
+import { zodResolver } from "@hookform/resolvers/zod"
 import { useEffect, useState } from "react"
+import { useForm, useWatch } from "react-hook-form"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import {
@@ -14,11 +16,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import type { RegisterPayload } from "@/context/AuthContext"
 import { useAuth } from "@/context/AuthContext"
 import { ApiError } from "@/lib/api"
+import { registerSchema, type RegisterFormValues } from "@/lib/schemas"
 
 function formatFieldErrors(body: unknown): string {
   if (!body || typeof body !== "object") return "Inscription impossible"
@@ -33,15 +43,25 @@ function formatFieldErrors(body: unknown): string {
 
 export function RegisterPage() {
   const navigate = useNavigate()
-  const { register } = useAuth()
-  const [username, setUsername] = useState("")
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [passwordConfirm, setPasswordConfirm] = useState("")
+  const { register: registerUser } = useAuth()
   const [avatarChoice, setAvatarChoice] = useState<RegisterAvatarChoice>({
     kind: "none",
   })
-  const [loading, setLoading] = useState(false)
+
+  const form = useForm<RegisterFormValues>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      username: "",
+      email: "",
+      password: "",
+      password_confirm: "",
+    },
+  })
+
+  const watchedUsername = useWatch({
+    control: form.control,
+    name: "username",
+  })
 
   useEffect(() => {
     return () => {
@@ -51,33 +71,31 @@ export function RegisterPage() {
     }
   }, [avatarChoice])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true)
+  async function onSubmit(values: RegisterFormValues) {
     try {
       if (avatarChoice.kind === "file") {
         const fd = new FormData()
-        fd.append("username", username)
-        fd.append("email", email)
-        fd.append("password", password)
-        fd.append("password_confirm", passwordConfirm)
+        fd.append("username", values.username)
+        fd.append("email", values.email)
+        fd.append("password", values.password)
+        fd.append("password_confirm", values.password_confirm)
         fd.append("avatar", avatarChoice.file)
-        await register(fd)
+        await registerUser(fd)
       } else if (avatarChoice.kind === "url") {
         const payload: RegisterPayload = {
-          username,
-          email,
-          password,
-          password_confirm: passwordConfirm,
+          username: values.username,
+          email: values.email,
+          password: values.password,
+          password_confirm: values.password_confirm,
           avatar_url: avatarChoice.url,
         }
-        await register(payload)
+        await registerUser(payload)
       } else {
-        await register({
-          username,
-          email,
-          password,
-          password_confirm: passwordConfirm,
+        await registerUser({
+          username: values.username,
+          email: values.email,
+          password: values.password,
+          password_confirm: values.password_confirm,
         })
       }
       toast.success("Compte créé — connectez-vous")
@@ -88,86 +106,113 @@ export function RegisterPage() {
       } else {
         toast.error("Inscription impossible")
       }
-    } finally {
-      setLoading(false)
     }
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-6">
-      <Card className="w-full max-w-lg border-border/60 shadow-lg">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-semibold tracking-tight">
+    <div className="flex min-h-screen items-center justify-center bg-background bg-[radial-gradient(ellipse_100%_80%_at_50%_-20%,hsl(var(--primary)/0.06),transparent)] p-6">
+      <Card className="w-full max-w-lg border-border/50 shadow-sm">
+        <CardHeader className="space-y-1 pb-2">
+          <CardTitle className="text-xl font-semibold tracking-tight">
             Créer un compte
           </CardTitle>
-          <CardDescription>
-            Avatar optionnel (initiales DiceBear, aléatoire ou fichier), puis accès JWT.
+          <CardDescription className="text-[13px] leading-relaxed">
+            Avatar optionnel (DiceBear, fichier ou URL), puis connexion JWT.
           </CardDescription>
         </CardHeader>
-        <form onSubmit={handleSubmit}>
-          <CardContent className="grid gap-4">
-            <RegisterAvatarPicker
-              username={username}
-              value={avatarChoice}
-              onChange={setAvatarChoice}
-            />
-            <div className="grid gap-2">
-              <Label htmlFor="user">Nom d&apos;utilisateur</Label>
-              <Input
-                id="user"
-                autoComplete="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)}>
+            <CardContent className="grid gap-4 pt-0">
+              <RegisterAvatarPicker
+                username={watchedUsername}
+                value={avatarChoice}
+                onChange={setAvatarChoice}
               />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="email">E-mail</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
+              <FormField
+                control={form.control}
+                name="username"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nom d&apos;utilisateur</FormLabel>
+                    <FormControl>
+                      <Input autoComplete="username" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pass">Mot de passe</Label>
-              <Input
-                id="pass"
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={8}
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>E-mail</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="email"
+                        autoComplete="email"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pass2">Confirmer le mot de passe</Label>
-              <Input
-                id="pass2"
-                type="password"
-                autoComplete="new-password"
-                value={passwordConfirm}
-                onChange={(e) => setPasswordConfirm(e.target.value)}
-                required
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mot de passe</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        autoComplete="new-password"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-3">
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Création…" : "S'inscrire"}
-            </Button>
-            <p className="text-center text-sm text-muted-foreground">
-              Déjà inscrit ?{" "}
-              <Link to="/login" className="text-primary underline-offset-4 hover:underline">
-                Se connecter
-              </Link>
-            </p>
-          </CardFooter>
-        </form>
+              <FormField
+                control={form.control}
+                name="password_confirm"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Confirmer le mot de passe</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        autoComplete="new-password"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+            <CardFooter className="flex flex-col gap-3 pt-2">
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={form.formState.isSubmitting}
+              >
+                {form.formState.isSubmitting ? "Création…" : "S'inscrire"}
+              </Button>
+              <p className="text-center text-[13px] text-muted-foreground">
+                Déjà inscrit ?{" "}
+                <Link
+                  to="/login"
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  Se connecter
+                </Link>
+              </p>
+            </CardFooter>
+          </form>
+        </Form>
       </Card>
     </div>
   )

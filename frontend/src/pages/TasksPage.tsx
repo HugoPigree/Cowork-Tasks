@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
-import { CheckSquare2, Settings2 } from "lucide-react"
+import { CheckSquare2, Settings2, Sparkles } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,12 +28,14 @@ import { ProjectBoardToolbar } from "@/components/tasks/ProjectBoardToolbar"
 import { TaskFormDialog } from "@/components/tasks/TaskFormDialog"
 import { TaskModal } from "@/components/tasks/TaskModal"
 import { BacklogObjectivePanel } from "@/components/tasks/BacklogObjectivePanel"
+import { SprintManageDialog } from "@/components/tasks/SprintManageDialog"
 import { UserAccountMenu } from "@/components/layout/UserAccountMenu"
 import { useWorkspace } from "@/context/WorkspaceContext"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { ApiError, tasksApi, workspacesApi } from "@/lib/api"
 import type {
   BoardColumn,
+  Sprint,
   Task,
   TaskPriority,
   TaskReorderItem,
@@ -66,6 +68,9 @@ export function TasksPage() {
   } | null>(null)
   const [addColumnOpen, setAddColumnOpen] = useState(false)
   const [filterAssignee, setFilterAssignee] = useState<string>("all")
+  const [filterSprint, setFilterSprint] = useState<string>("all")
+  const [sprints, setSprints] = useState<Sprint[]>([])
+  const [sprintManageOpen, setSprintManageOpen] = useState(false)
 
   const canManageBoardColumns =
     currentWorkspace?.my_role === "owner" ||
@@ -100,6 +105,25 @@ export function TasksPage() {
     }
   }, [currentWorkspaceId])
 
+  useEffect(() => {
+    if (!currentWorkspaceId) {
+      setSprints([])
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const list = await workspacesApi.listSprints(currentWorkspaceId)
+        if (!cancelled) setSprints(list)
+      } catch {
+        if (!cancelled) setSprints([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currentWorkspaceId])
+
   const loadKanbanBoard = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!currentWorkspaceId) {
@@ -125,6 +149,12 @@ export function TasksPage() {
                   ? "unassigned"
                   : filterAssignee,
             search: debouncedSearch,
+            sprint:
+              filterSprint === "all"
+                ? undefined
+                : filterSprint === "none"
+                  ? "none"
+                  : filterSprint,
           }),
         ])
         setKanbanColumns(board.columns)
@@ -139,8 +169,29 @@ export function TasksPage() {
         if (!silent) setKanbanLoading(false)
       }
     },
-    [currentWorkspaceId, filterAssignee, debouncedSearch],
+    [currentWorkspaceId, filterAssignee, filterSprint, debouncedSearch],
   )
+
+  const handleSprintsChanged = useCallback(async () => {
+    if (!currentWorkspaceId) return
+    try {
+      const list = await workspacesApi.listSprints(currentWorkspaceId)
+      setSprints(list)
+      setFilterSprint((prev) => {
+        if (
+          prev !== "all" &&
+          prev !== "none" &&
+          !list.some((s) => String(s.id) === prev)
+        ) {
+          return "all"
+        }
+        return prev
+      })
+      await loadKanbanBoard({ silent: true })
+    } catch {
+      toast.error("Impossible de rafraîchir les sprints")
+    }
+  }, [currentWorkspaceId, loadKanbanBoard])
 
   useEffect(() => {
     void loadKanbanBoard()
@@ -152,6 +203,7 @@ export function TasksPage() {
     priority: TaskPriority
     due_date: string | null
     assignee_id: number | null
+    sprint_id: number | null
     board_column_id?: number
   }) {
     if (!currentWorkspaceId) return
@@ -163,6 +215,7 @@ export function TasksPage() {
           priority: payload.priority,
           due_date: payload.due_date,
           assignee_id: payload.assignee_id,
+          sprint_id: payload.sprint_id,
         })
         toast.success("Tâche mise à jour")
       } else {
@@ -173,6 +226,7 @@ export function TasksPage() {
           priority: payload.priority,
           due_date: payload.due_date,
           assignee_id: payload.assignee_id,
+          sprint_id: payload.sprint_id,
           board_column_id: payload.board_column_id,
         })
         toast.success("Tâche créée")
@@ -251,7 +305,7 @@ export function TasksPage() {
 
   if (wsLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-8">
+      <div className="flex min-h-screen items-center justify-center bg-background p-8">
         <p className="text-muted-foreground">Chargement des espaces…</p>
       </div>
     )
@@ -259,7 +313,7 @@ export function TasksPage() {
 
   if (!currentWorkspaceId || workspaces.length === 0) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-8">
         <p className="text-center text-muted-foreground">
           Aucun espace de travail. Créez-en un pour collaborer.
         </p>
@@ -271,8 +325,8 @@ export function TasksPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background via-background to-muted/30">
-      <header className="sticky top-0 z-40 border-b border-border/40 bg-background/80 backdrop-blur-md">
+    <div className="min-h-screen bg-background bg-[radial-gradient(ellipse_120%_90%_at_50%_-25%,hsl(var(--primary)/0.08),transparent)]">
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-card/90 shadow-sm shadow-black/[0.04] backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl flex-wrap items-center justify-between gap-3 px-4">
           <Link
             to="/"
@@ -307,12 +361,18 @@ export function TasksPage() {
                 Espaces
               </Link>
             </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/aide-creation-uc" className="gap-1">
+                <Sparkles className="h-4 w-4" />
+                Aide UC
+              </Link>
+            </Button>
             <UserAccountMenu />
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-[min(100%,1600px)] space-y-6 px-4 py-6 sm:py-8">
+      <main className="mx-auto max-w-[min(100%,1600px)] space-y-6 px-4 py-6 sm:px-5 sm:py-8">
         {currentWorkspaceId ? (
           <BacklogObjectivePanel
             workspaceId={currentWorkspaceId}
@@ -331,9 +391,13 @@ export function TasksPage() {
             onSearchChange={setSearchInput}
             filterAssignee={filterAssignee}
             onFilterAssignee={setFilterAssignee}
+            filterSprint={filterSprint}
+            onFilterSprint={setFilterSprint}
+            sprints={sprints}
+            onOpenSprintManager={() => setSprintManageOpen(true)}
             members={members}
           />
-          <CardContent className="border-t border-border/40 bg-muted/15 p-4 sm:p-5">
+          <CardContent className="border-t border-border/50 bg-muted/25 p-4 sm:p-6">
             {kanbanLoading ? (
               <div className="flex gap-4 overflow-hidden">
                 {[1, 2, 3].map((i) => (
@@ -371,8 +435,17 @@ export function TasksPage() {
         }}
         task={editing}
         members={members}
+        sprints={sprints}
         defaultColumnId={createDefaults?.columnId}
         onSave={handleSave}
+      />
+
+      <SprintManageDialog
+        open={sprintManageOpen}
+        onOpenChange={setSprintManageOpen}
+        workspaceId={currentWorkspaceId}
+        sprints={sprints}
+        onSprintsChanged={() => void handleSprintsChanged()}
       />
 
       <AddBoardColumnDialog
@@ -389,12 +462,10 @@ export function TasksPage() {
         }}
         task={modalTask}
         workspaceId={currentWorkspaceId}
+        members={members}
+        sprints={sprints}
         onUpdated={async () => {
           await loadKanbanBoard({ silent: true })
-        }}
-        onEdit={(t) => {
-          setEditing(t)
-          setDialogOpen(true)
         }}
         onDelete={(t) => setDeleteTarget(t)}
       />

@@ -10,6 +10,7 @@ import type {
   MeResponse,
   ObjectiveSummary,
   RegisterResponse,
+  Sprint,
   SuggestedTaskTemplate,
   TokenResponse,
   Workspace,
@@ -17,19 +18,31 @@ import type {
   WorkspaceMember,
 } from "./types"
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? ""
+/** Origin only (e.g. http://localhost:8000). Paths already include `/api/...`. */
+const API_BASE_RAW = (import.meta.env.VITE_API_BASE ?? "").trim()
 
 function buildUrl(path: string): string {
   if (path.startsWith("http")) return path
-  const p = path.startsWith("/") ? path : `/${path}`
-  return `${API_BASE}${p}`
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`
+  let base = API_BASE_RAW.replace(/\/+$/, "")
+  // If env wrongly ends with `/api` and path is `/api/...`, avoid `/api/api/...` (404).
+  if (
+    /\/api$/i.test(base) &&
+    normalizedPath.toLowerCase().startsWith("/api/")
+  ) {
+    base = base.replace(/\/api$/i, "").replace(/\/+$/, "")
+  }
+  if (!base) return normalizedPath
+  return `${base}${normalizedPath}`
 }
 
 export class ApiError extends Error {
   status: number
   body: unknown
+  /** Resolved request URL (useful when debugging 404 / wrong API base). */
+  requestUrl: string
 
-  constructor(status: number, body: unknown) {
+  constructor(status: number, body: unknown, requestUrl = "") {
     super(
       typeof body === "object" && body && "detail" in (body as object)
         ? String((body as { detail: unknown }).detail)
@@ -37,6 +50,7 @@ export class ApiError extends Error {
     )
     this.status = status
     this.body = body
+    this.requestUrl = requestUrl
   }
 }
 
@@ -85,7 +99,8 @@ export async function apiFetch<T>(
   const access = localStorage.getItem("access")
   if (access) hdrs.set("Authorization", `Bearer ${access}`)
 
-  const res = await fetch(buildUrl(path), { ...rest, headers: hdrs })
+  const requestUrl = buildUrl(path)
+  const res = await fetch(requestUrl, { ...rest, headers: hdrs })
   const text = await res.text()
   const data = parseJson(text) as T
 
@@ -101,7 +116,7 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    throw new ApiError(res.status, data)
+    throw new ApiError(res.status, data, requestUrl)
   }
   return data
 }
@@ -180,6 +195,21 @@ export const workspacesApi = {
       method: "POST",
       json: body,
     }),
+
+  listSprints: (workspaceId: number) =>
+    apiFetch<Sprint[]>(`/api/workspaces/${workspaceId}/sprints/`),
+
+  createSprint: (workspaceId: number, body: { name: string; color: string }) =>
+    apiFetch<Sprint>(`/api/workspaces/${workspaceId}/sprints/`, {
+      method: "POST",
+      json: body,
+    }),
+
+  deleteSprint: (workspaceId: number, sprintId: number) =>
+    apiFetch<null>(
+      `/api/workspaces/${workspaceId}/sprints/${sprintId}/`,
+      { method: "DELETE" }
+    ),
 }
 
 export const objectivesApi = {
@@ -199,6 +229,8 @@ export const tasksApi = {
     status?: TaskStatus | ""
     priority?: TaskPriority | ""
     assignee?: string
+    /** Filtre sprint : id numérique, ou "none" pour sans sprint ; omis = tous */
+    sprint?: string
     ordering?: TaskOrdering
     search?: string
     root_only?: boolean
@@ -210,6 +242,9 @@ export const tasksApi = {
     if (params.status) q.set("status", params.status)
     if (params.priority) q.set("priority", params.priority)
     if (params.assignee) q.set("assignee", params.assignee)
+    if (params.sprint != null && params.sprint !== "") {
+      q.set("sprint", params.sprint)
+    }
     if (params.ordering) q.set("ordering", params.ordering)
     if (params.search?.trim()) q.set("search", params.search.trim())
     if (params.root_only) q.set("root_only", "true")
@@ -224,6 +259,7 @@ export const tasksApi = {
     priority?: TaskPriority
     due_date?: string | null
     assignee_id?: number | null
+    sprint_id?: number | null
     board_column_id?: number
     estimate?: number | null
   }) => apiFetch<Task>("/api/tasks/", { method: "POST", json: body }),
@@ -237,6 +273,7 @@ export const tasksApi = {
       position: number
       due_date: string | null
       assignee_id: number | null
+      sprint_id: number | null
       board_column_id: number
       estimate: number | null
       depends_on_ids: number[]

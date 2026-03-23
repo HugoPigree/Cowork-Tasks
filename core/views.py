@@ -17,6 +17,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from core.avatar_utils import user_avatar_absolute_url
 from core.models import (
     BoardColumn,
+    Sprint,
     Task,
     TaskComment,
     User,
@@ -43,6 +44,7 @@ from core.serializers import (
     ObjectiveGenerateSerializer,
     TaskReorderSerializer,
     TaskSerializer,
+    SprintSerializer,
     UserRegistrationSerializer,
     WorkspaceMemberSerializer,
     WorkspaceSerializer,
@@ -141,7 +143,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), IsWorkspaceCreator()]
         if self.action == "destroy":
             return [IsAuthenticated(), IsWorkspaceCreator()]
-        if self.action in ("members", "board"):
+        if self.action in ("members", "board", "sprints", "sprint_destroy"):
             return [IsAuthenticated(), IsWorkspaceMember()]
         if self.action == "add_member":
             return [IsAuthenticated(), IsWorkspaceCreator()]
@@ -261,6 +263,32 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["get", "post"], url_path="sprints")
+    def sprints(self, request, pk=None):
+        """List or create sprints for this workspace."""
+        workspace = self.get_object()
+        if request.method == "GET":
+            qs = workspace.sprints.all()
+            return Response(SprintSerializer(qs, many=True).data)
+        ser = SprintSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        sp = Sprint.objects.create(workspace=workspace, **ser.validated_data)
+        return Response(SprintSerializer(sp).data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path=r"sprints/(?P<sprint_id>\d+)",
+    )
+    def sprint_destroy(self, request, pk=None, sprint_id=None):
+        workspace = self.get_object()
+        deleted, _ = Sprint.objects.filter(
+            pk=int(sprint_id), workspace=workspace
+        ).delete()
+        if not deleted:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(detail=True, methods=["get"])
     def members(self, request, pk=None):
         workspace = self.get_object()
@@ -360,6 +388,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 "workspace",
                 "created_by",
                 "assignee",
+                "sprint",
                 "board_column",
                 "board_column__board",
             )
@@ -387,6 +416,17 @@ class TaskViewSet(viewsets.ModelViewSet):
             qs = qs.filter(assignee__isnull=True)
         elif assignee:
             qs = qs.filter(assignee_id=assignee)
+
+        sprint_q = self.request.query_params.get("sprint")
+        if sprint_q is not None and sprint_q != "":
+            key = str(sprint_q).lower()
+            if key in ("none", "null", "unassigned", "no_sprint"):
+                qs = qs.filter(sprint__isnull=True)
+            else:
+                try:
+                    qs = qs.filter(sprint_id=int(sprint_q))
+                except ValueError:
+                    pass
 
         search = (self.request.query_params.get("search") or "").strip()
         if search:

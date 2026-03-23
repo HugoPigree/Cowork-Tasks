@@ -9,6 +9,7 @@ from pathlib import Path
 
 from decouple import Csv, config
 from datetime import timedelta
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,6 +33,12 @@ ALLOWED_HOSTS = config(
     cast=Csv(),
 )
 
+# Reject Django's documented insecure default when not in debug (tests use DEBUG=True).
+if not DEBUG and SECRET_KEY == "django-insecure-change-me-in-production":
+    raise ImproperlyConfigured(
+        "Set a unique SECRET_KEY in the environment for production (see .env.example)."
+    )
+
 # Custom user model lives in the `core` app.
 AUTH_USER_MODEL = "core.User"
 
@@ -52,6 +59,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -123,9 +131,60 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# WhiteNoise: compressed static assets (run `collectstatic` in the image build or before deploy).
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+    },
+}
+
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --- Production hardening (when DEBUG=False) ---
+if not DEBUG:
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"
+
+    if config("DJANGO_TRUST_X_FORWARDED_PROTO", default="false", cast=bool):
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+        USE_X_FORWARDED_HOST = True
+
+    if config("DJANGO_SECURE_SSL_REDIRECT", default="false", cast=bool):
+        SECURE_SSL_REDIRECT = True
+
+    _hsts = config("DJANGO_SECURE_HSTS_SECONDS", default=0, cast=int)
+    if _hsts > 0:
+        SECURE_HSTS_SECONDS = _hsts
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = config(
+            "DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", default="true", cast=bool
+        )
+        SECURE_HSTS_PRELOAD = config(
+            "DJANGO_SECURE_HSTS_PRELOAD", default="false", cast=bool
+        )
+
+    if config("DJANGO_SESSION_COOKIE_SECURE", default="false", cast=bool):
+        SESSION_COOKIE_SECURE = True
+        CSRF_COOKIE_SECURE = True
+
+# Origins for CSRF (Django admin / forms behind HTTPS). Comma-separated full URLs.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip()
+    for o in config("CSRF_TRUSTED_ORIGINS", default="", cast=Csv())
+    if o.strip()
+]
+
+# Optional: serve user uploads through Gunicorn (OK for small setups; use nginx + volume at scale).
+SERVE_MEDIA_THROUGH_DJANGO = config(
+    "DJANGO_SERVE_MEDIA", default="false", cast=bool
+)
 
 # --- Django REST framework ---
 REST_FRAMEWORK = {

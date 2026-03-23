@@ -1,4 +1,4 @@
-import { Columns3, Github, Plus, Search } from "lucide-react"
+import { Columns3, Github, Plus, Search, Settings2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { WorkspaceMember } from "@/lib/types"
+import type { Sprint, WorkspaceMember } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /** Préfixe https si l’utilisateur colle `github.com/...`. */
@@ -40,6 +40,11 @@ export type ProjectBoardToolbarProps = {
   onSearchChange: (value: string) => void
   filterAssignee: string
   onFilterAssignee: (value: string) => void
+  /** "all" | "none" | sprint id string */
+  filterSprint: string
+  onFilterSprint: (value: string) => void
+  sprints: Sprint[]
+  onOpenSprintManager: () => void
   members: WorkspaceMember[]
 }
 
@@ -53,6 +58,10 @@ export function ProjectBoardToolbar({
   onSearchChange,
   filterAssignee,
   onFilterAssignee,
+  filterSprint,
+  onFilterSprint,
+  sprints,
+  onOpenSprintManager,
   members,
 }: ProjectBoardToolbarProps) {
   const repoHref = gitHubRepoHref(githubUrl ?? "")
@@ -80,7 +89,7 @@ export function ProjectBoardToolbar({
               </span>
             </div>
             {description?.trim() ? (
-              <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground line-clamp-2">
+              <p className="max-w-2xl whitespace-pre-wrap text-sm leading-[1.65] text-muted-foreground line-clamp-2">
                 {description.trim()}
               </p>
             ) : null}
@@ -108,10 +117,10 @@ export function ProjectBoardToolbar({
 
         <div
           className={cn(
-            "flex flex-col gap-3 rounded-lg border border-border/50 bg-muted/30 px-3 py-3 sm:flex-row sm:items-center sm:gap-3 dark:bg-muted/15"
+            "flex flex-col gap-3 rounded-lg border border-border/50 bg-muted/30 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 dark:bg-muted/15"
           )}
         >
-          <div className="relative min-w-0 flex-1">
+          <div className="relative min-w-0 flex-1 sm:min-w-[200px]">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={searchInput}
@@ -121,24 +130,63 @@ export function ProjectBoardToolbar({
               aria-label="Rechercher une tâche par titre"
             />
           </div>
-          <div className="w-full shrink-0 sm:w-[200px]">
-            <Select value={filterAssignee} onValueChange={onFilterAssignee}>
-              <SelectTrigger
-                className="h-9 border-border/60 bg-background text-sm"
-                aria-label="Filtrer par assignation"
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-0 sm:flex-1 sm:flex-row sm:gap-2">
+            <div className="w-full min-w-0 sm:w-[min(100%,200px)] sm:flex-1">
+              <Select value={filterAssignee} onValueChange={onFilterAssignee}>
+                <SelectTrigger
+                  className="h-9 border-border/60 bg-background text-sm"
+                  aria-label="Filtrer par assignation"
+                >
+                  <SelectValue placeholder="Assignation" />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="all">Toute l’équipe</SelectItem>
+                  <SelectItem value="unassigned">Non assigné</SelectItem>
+                  {members.map((m) => (
+                    <SelectItem key={m.id} value={String(m.user.id)}>
+                      {m.user.username}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex w-full min-w-0 gap-2 sm:w-[min(100%,220px)] sm:flex-1">
+              <Select value={filterSprint} onValueChange={onFilterSprint}>
+                <SelectTrigger
+                  className="h-9 flex-1 border-border/60 bg-background text-sm"
+                  aria-label="Filtrer par sprint"
+                >
+                  <SelectValue placeholder="Sprint" />
+                </SelectTrigger>
+                <SelectContent align="end" className="max-h-72">
+                  <SelectItem value="all">Tous les sprints</SelectItem>
+                  <SelectItem value="none">Sans sprint</SelectItem>
+                  {sprints.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: s.color }}
+                          aria-hidden
+                        />
+                        {s.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0 gap-1 px-2.5 text-xs"
+                onClick={onOpenSprintManager}
+                title="Gérer les sprints"
               >
-                <SelectValue placeholder="Assignation" />
-              </SelectTrigger>
-              <SelectContent align="end">
-                <SelectItem value="all">Toute l’équipe</SelectItem>
-                <SelectItem value="unassigned">Non assigné</SelectItem>
-                {members.map((m) => (
-                  <SelectItem key={m.id} value={String(m.user.id)}>
-                    {m.user.username}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <Settings2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Sprints</span>
+              </Button>
+            </div>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Loader2, Pencil, Trash2, X } from "lucide-react"
+import { AlertTriangle, Loader2, Trash2, X } from "lucide-react"
 import { CommentSection } from "@/components/tasks/CommentSection"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,9 +21,17 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Textarea } from "@/components/ui/textarea"
 import { ApiError, tasksApi } from "@/lib/api"
+import { FORMATTED_MULTILINE } from "@/lib/formattedText"
 import { getDueUrgency } from "@/lib/dueDateUrgency"
-import type { Task, TaskPriority, TaskStatus } from "@/lib/types"
+import type {
+  Sprint,
+  Task,
+  TaskPriority,
+  TaskStatus,
+  WorkspaceMember,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const statusLabel: Record<TaskStatus, string> = {
@@ -50,7 +58,7 @@ function priorityVariant(
   p: TaskPriority
 ): "default" | "secondary" | "outline" | "destructive" {
   if (p === "high") return "destructive"
-  if (p === "medium") return "default"
+  if (p === "medium") return "secondary"
   return "outline"
 }
 
@@ -59,7 +67,15 @@ function withTaskDefaults(t: Task): Task {
     ...t,
     depends_on: t.depends_on ?? [],
     is_blocked: Boolean(t.is_blocked),
+    sprint: t.sprint ?? null,
   }
+}
+
+function toDatetimeLocal(iso: string | null): string {
+  if (!iso) return ""
+  const d = new Date(iso)
+  const p = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 type Props = {
@@ -67,8 +83,11 @@ type Props = {
   onOpenChange: (open: boolean) => void
   task: Task | null
   workspaceId: number | null
+  /** Membres de l’espace pour le select « Assigné à » */
+  members: WorkspaceMember[]
+  /** Sprints de l’espace pour l’assignation */
+  sprints: Sprint[]
   onUpdated: () => Promise<void> | void
-  onEdit: (task: Task) => void
   onDelete: (task: Task) => void
 }
 
@@ -77,12 +96,24 @@ export function TaskModal({
   onOpenChange,
   task,
   workspaceId,
+  members,
+  sprints,
   onUpdated,
-  onEdit,
   onDelete,
 }: Props) {
   const [title, setTitle] = useState("")
   const [savingTitle, setSavingTitle] = useState(false)
+  const [description, setDescription] = useState("")
+  const [savingDescription, setSavingDescription] = useState(false)
+  const [assigneeKey, setAssigneeKey] = useState<string>("__none__")
+  const [savingAssignee, setSavingAssignee] = useState(false)
+  const [priority, setPriority] = useState<TaskPriority>("medium")
+  const [savingPriority, setSavingPriority] = useState(false)
+  const [dueLocal, setDueLocal] = useState("")
+  const [savingDue, setSavingDue] = useState(false)
+  const [sprintKey, setSprintKey] = useState<string>("__none__")
+  const [savingSprint, setSavingSprint] = useState(false)
+
   const [detail, setDetail] = useState<Task | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [candidates, setCandidates] = useState<Task[]>([])
@@ -95,6 +126,11 @@ export function TaskModal({
       return
     }
     setTitle(task.title)
+    setDescription(task.description ?? "")
+    setAssigneeKey(task.assignee ? String(task.assignee.id) : "__none__")
+    setPriority(task.priority)
+    setDueLocal(toDatetimeLocal(task.due_date))
+    setSprintKey(task.sprint ? String(task.sprint.id) : "__none__")
     setDetail(withTaskDefaults(task))
     setDetailLoading(true)
     void (async () => {
@@ -103,6 +139,15 @@ export function TaskModal({
         const normalized = withTaskDefaults(fresh)
         setDetail(normalized)
         setTitle(normalized.title)
+        setDescription(normalized.description ?? "")
+        setAssigneeKey(
+          normalized.assignee ? String(normalized.assignee.id) : "__none__"
+        )
+        setPriority(normalized.priority)
+        setDueLocal(toDatetimeLocal(normalized.due_date))
+        setSprintKey(
+          normalized.sprint ? String(normalized.sprint.id) : "__none__"
+        )
       } catch {
         toast.error("Impossible de charger le détail de la tâche")
       } finally {
@@ -131,6 +176,11 @@ export function TaskModal({
     })()
   }, [open, workspaceId])
 
+  async function refreshDetail(taskId: number) {
+    const fresh = await tasksApi.get(taskId)
+    setDetail(withTaskDefaults(fresh))
+  }
+
   async function commitTitle() {
     if (!detail) return
     const next = title.trim()
@@ -140,14 +190,114 @@ export function TaskModal({
       await tasksApi.patch(detail.id, { title: next })
       toast.success("Titre mis à jour")
       await onUpdated()
-      const fresh = await tasksApi.get(detail.id)
-      setDetail(withTaskDefaults(fresh))
+      await refreshDetail(detail.id)
     } catch (err) {
       if (err instanceof ApiError) toast.error(err.message)
       else toast.error("Erreur réseau")
       setTitle(detail.title)
     } finally {
       setSavingTitle(false)
+    }
+  }
+
+  async function commitDescription() {
+    if (!detail) return
+    const next = description
+    if (next === (detail.description ?? "")) return
+    setSavingDescription(true)
+    try {
+      await tasksApi.patch(detail.id, { description: next })
+      await onUpdated()
+      await refreshDetail(detail.id)
+    } catch (err) {
+      if (err instanceof ApiError) toast.error(err.message)
+      else toast.error("Erreur réseau")
+      setDescription(detail.description ?? "")
+    } finally {
+      setSavingDescription(false)
+    }
+  }
+
+  async function commitAssignee(nextKey: string) {
+    if (!detail) return
+    const assignee_id =
+      nextKey === "__none__" ? null : parseInt(nextKey, 10)
+    const prevKey = detail.assignee
+      ? String(detail.assignee.id)
+      : "__none__"
+    if (nextKey === prevKey) return
+    setAssigneeKey(nextKey)
+    setSavingAssignee(true)
+    try {
+      await tasksApi.patch(detail.id, { assignee_id })
+      await onUpdated()
+      await refreshDetail(detail.id)
+    } catch (err) {
+      if (err instanceof ApiError) toast.error(err.message)
+      else toast.error("Erreur réseau")
+      setAssigneeKey(prevKey)
+    } finally {
+      setSavingAssignee(false)
+    }
+  }
+
+  async function commitPriority(next: TaskPriority) {
+    if (!detail || next === detail.priority) return
+    const prev = detail.priority
+    setPriority(next)
+    setSavingPriority(true)
+    try {
+      await tasksApi.patch(detail.id, { priority: next })
+      await onUpdated()
+      await refreshDetail(detail.id)
+    } catch (err) {
+      if (err instanceof ApiError) toast.error(err.message)
+      else toast.error("Erreur réseau")
+      setPriority(prev)
+    } finally {
+      setSavingPriority(false)
+    }
+  }
+
+  async function commitSprint(nextKey: string) {
+    if (!detail) return
+    const sprint_id =
+      nextKey === "__none__" ? null : parseInt(nextKey, 10)
+    const prevKey = detail.sprint ? String(detail.sprint.id) : "__none__"
+    if (nextKey === prevKey) return
+    setSprintKey(nextKey)
+    setSavingSprint(true)
+    try {
+      await tasksApi.patch(detail.id, { sprint_id })
+      await onUpdated()
+      await refreshDetail(detail.id)
+    } catch (err) {
+      if (err instanceof ApiError) toast.error(err.message)
+      else toast.error("Erreur réseau")
+      setSprintKey(prevKey)
+    } finally {
+      setSavingSprint(false)
+    }
+  }
+
+  async function commitDue() {
+    if (!detail) return
+    const nextIso = dueLocal
+      ? new Date(dueLocal).toISOString()
+      : null
+    const prevIso = detail.due_date
+    if (nextIso === prevIso || (!nextIso && !prevIso)) return
+    setSavingDue(true)
+    try {
+      await tasksApi.patch(detail.id, { due_date: nextIso })
+      await onUpdated()
+      await refreshDetail(detail.id)
+    } catch (err) {
+      if (err instanceof ApiError) toast.error(err.message)
+      else toast.error("Erreur réseau")
+      setDueLocal(toDatetimeLocal(detail.due_date))
+    } finally {
+      setSavingDue(false)
     }
   }
 
@@ -197,14 +347,21 @@ export function TaskModal({
   )
 
   const sectionLabel =
-    "text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+    "text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+
+  const dueHint =
+    display?.due_date && dueUrgency === "overdue"
+      ? "Échéance dépassée"
+      : display?.due_date && dueUrgency === "soon"
+        ? "Échéance dans moins de 24 h"
+        : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[min(92dvh,880px)] w-[calc(100vw-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
         {display ? (
           <>
-            <DialogHeader className="shrink-0 space-y-3 border-b border-border/50 bg-muted/20 px-5 py-4 text-left">
+            <DialogHeader className="shrink-0 space-y-3 border-b border-border/60 bg-muted/35 px-5 py-5 text-left">
               <div className="flex flex-wrap items-center gap-2">
                 {detailLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -212,8 +369,8 @@ export function TaskModal({
                 <Badge variant={statusVariant(display.status)}>
                   {statusLabel[display.status]}
                 </Badge>
-                <Badge variant={priorityVariant(display.priority)}>
-                  {priorityLabel[display.priority]}
+                <Badge variant={priorityVariant(priority)}>
+                  {priorityLabel[priority]}
                 </Badge>
                 {display.is_blocked ? (
                   <Badge variant="destructive">Bloquée</Badge>
@@ -227,8 +384,15 @@ export function TaskModal({
                 ) : null}
               </div>
               <DialogTitle className="sr-only">Détail de la tâche</DialogTitle>
+              <DialogDescription className="sr-only">
+                Modifier la tâche, les dépendances et les commentaires.
+              </DialogDescription>
               <div className="space-y-2 pr-8">
+                <Label htmlFor="task-modal-title" className={sectionLabel}>
+                  Titre
+                </Label>
                 <Input
+                  id="task-modal-title"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   onBlur={() => void commitTitle()}
@@ -238,68 +402,178 @@ export function TaskModal({
                       void commitTitle()
                     }
                   }}
-                  className="border-transparent bg-transparent px-0 text-xl font-semibold leading-tight tracking-tight shadow-none focus-visible:ring-0"
+                  className="border-transparent bg-transparent px-0 text-xl font-semibold leading-snug tracking-tight shadow-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-muted/35"
                   disabled={savingTitle}
                 />
-                <DialogDescription className="text-left text-sm text-foreground/80">
-                  <span className="text-muted-foreground">Échéance :</span>{" "}
-                  {display.due_date ? (
-                    <span
-                      className={cn(
-                        "inline-flex flex-wrap items-center gap-x-1.5 gap-y-1 align-middle",
-                        dueUrgency === "soon" && "font-semibold text-destructive",
-                        dueUrgency === "overdue" && "font-semibold text-destructive"
-                      )}
-                    >
-                      {dueUrgency === "overdue" ? (
-                        <AlertTriangle
-                          className="inline h-4 w-4 shrink-0 text-destructive"
-                          aria-hidden
-                        />
-                      ) : null}
-                      {new Date(display.due_date).toLocaleString("fr-FR", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                      {dueUrgency === "overdue" ? (
-                        <Badge variant="destructive" className="text-[10px]">
-                          En retard
-                        </Badge>
-                      ) : dueUrgency === "soon" ? (
-                        <Badge
-                          variant="outline"
-                          className="border-destructive/45 text-[10px] text-destructive"
-                        >
-                          Sous 24 h
-                        </Badge>
-                      ) : null}
-                    </span>
-                  ) : (
-                    "—"
-                  )}{" "}
-                  <span className="mx-1.5 text-border">·</span>
-                  <span className="text-muted-foreground">Assigné :</span>{" "}
-                  {display.assignee
-                    ? `@${display.assignee.username}`
-                    : "non assigné"}
-                </DialogDescription>
               </div>
             </DialogHeader>
 
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-5">
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-background/40 px-5 py-6">
                 <div className="space-y-8 pb-2">
-                  <section className="space-y-2">
-                    <h3 className={sectionLabel}>Description</h3>
-                    <p className="border-l-2 border-primary/25 pl-3 text-[15px] leading-relaxed text-foreground">
-                      {display.description?.trim()
-                        ? display.description
-                        : "Aucune description."}
-                    </p>
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className={sectionLabel}>Description</h3>
+                      {savingDescription ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                      ) : null}
+                    </div>
+                    <Textarea
+                      id="task-modal-description"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      onBlur={() => void commitDescription()}
+                      placeholder="Contexte, liens, critères d’acceptation…"
+                      rows={6}
+                      disabled={savingDescription}
+                      className={cn(
+                        FORMATTED_MULTILINE,
+                        "min-h-[148px] resize-y"
+                      )}
+                    />
+                  </section>
+
+                  <section className="space-y-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="task-modal-assignee">Assigné à</Label>
+                      <Select
+                        value={assigneeKey}
+                        onValueChange={(v) => void commitAssignee(v)}
+                        disabled={savingAssignee}
+                      >
+                        <SelectTrigger
+                          id="task-modal-assignee"
+                          className="h-10 w-full"
+                        >
+                          <SelectValue placeholder="Choisir…" />
+                        </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Non assigné</SelectItem>
+                            {members.map((m) => (
+                              <SelectItem
+                                key={m.id}
+                                value={String(m.user.id)}
+                              >
+                                {m.user.username}
+                                {m.role === "owner" ? " (owner)" : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor="task-modal-sprint">Sprint</Label>
+                        {savingSprint ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                        ) : null}
+                      </div>
+                      <Select
+                        value={sprintKey}
+                        onValueChange={(v) => void commitSprint(v)}
+                        disabled={savingSprint}
+                      >
+                        <SelectTrigger
+                          id="task-modal-sprint"
+                          className="h-10 w-full"
+                        >
+                          <SelectValue placeholder="Choisir…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Aucun sprint</SelectItem>
+                          {sprints.map((s) => (
+                            <SelectItem key={s.id} value={String(s.id)}>
+                              <span className="flex items-center gap-2">
+                                <span
+                                  className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10"
+                                  style={{ backgroundColor: s.color }}
+                                  aria-hidden
+                                />
+                                {s.name}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Mobile : 2 blocs empilés. ≥sm : grille 3 lignes (libellés / champs h-10 / alerte). */}
+                    <div className="flex flex-col gap-4 sm:grid sm:grid-cols-2 sm:gap-x-4 sm:gap-y-2">
+                      <div className="flex flex-col gap-2 sm:contents">
+                        <Label
+                          htmlFor="task-modal-priority"
+                          className="text-[13px] font-semibold leading-snug sm:col-start-1 sm:row-start-1 sm:self-end"
+                        >
+                          Priorité
+                        </Label>
+                        <div className="min-w-0 sm:col-start-1 sm:row-start-2">
+                          <Select
+                            value={priority}
+                            onValueChange={(v) =>
+                              void commitPriority(v as TaskPriority)
+                            }
+                            disabled={savingPriority}
+                          >
+                            <SelectTrigger
+                              id="task-modal-priority"
+                              className="h-10 w-full"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="low">Basse</SelectItem>
+                              <SelectItem value="medium">Moyenne</SelectItem>
+                              <SelectItem value="high">Haute</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2 sm:contents">
+                        <Label
+                          htmlFor="task-modal-due"
+                          className="text-[13px] font-semibold leading-snug sm:col-start-2 sm:row-start-1 sm:self-end"
+                        >
+                          Échéance (optionnel)
+                        </Label>
+                        <div className="min-w-0 sm:col-start-2 sm:row-start-2">
+                          <Input
+                            id="task-modal-due"
+                            type="datetime-local"
+                            value={dueLocal}
+                            onChange={(e) => setDueLocal(e.target.value)}
+                            onBlur={() => void commitDue()}
+                            disabled={savingDue}
+                            className="h-10 w-full py-0 leading-normal shadow-sm"
+                          />
+                        </div>
+                        <div className="sm:col-start-2 sm:row-start-3">
+                          {dueHint ? (
+                            <p
+                              className={cn(
+                                "flex flex-wrap items-center gap-1.5 text-xs",
+                                dueUrgency === "overdue" &&
+                                  "font-medium text-destructive",
+                                dueUrgency === "soon" &&
+                                  "font-medium text-destructive"
+                              )}
+                            >
+                              {dueUrgency === "overdue" ? (
+                                <AlertTriangle
+                                  className="h-3.5 w-3.5 shrink-0"
+                                  aria-hidden
+                                />
+                              ) : null}
+                              {dueHint}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
                   </section>
 
                   <section
-                    className="rounded-xl border-2 border-border/70 bg-muted/35 px-4 py-5 shadow-sm ring-1 ring-black/[0.04] sm:px-5"
+                    className="rounded-xl border border-border/60 bg-card px-4 py-5 shadow-md shadow-black/[0.05] ring-1 ring-black/[0.03] sm:px-5"
                     aria-labelledby="task-deps-heading"
                   >
                     <div className="border-b border-border/60 pb-4">
@@ -410,21 +684,8 @@ export function TaskModal({
                   <CommentSection taskId={display.id} open={open} />
                 </div>
               </div>
-              <div className="shrink-0 border-t border-border/60 bg-muted/25 px-5 py-3.5">
+              <div className="shrink-0 border-t border-border/60 bg-muted/40 px-5 py-4">
                 <div className="flex flex-wrap justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => {
-                      onEdit(display)
-                      onOpenChange(false)
-                    }}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                    Modifier tout
-                  </Button>
                   <Button
                     type="button"
                     variant="outline"

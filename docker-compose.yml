@@ -23,14 +23,33 @@ services:
       DEBUG: "False"
       DB_HOST: db
       DB_PORT: "5432"
+      # Trust X-Forwarded-Proto from a reverse proxy (Traefik, Caddy, nginx) terminating TLS
+      DJANGO_TRUST_X_FORWARDED_PROTO: ${DJANGO_TRUST_X_FORWARDED_PROTO:-true}
+      # Serve /media/* through Gunicorn when no nginx alias (set false if using external storage)
+      DJANGO_SERVE_MEDIA: ${DJANGO_SERVE_MEDIA:-true}
     command: >
       sh -c "python manage.py migrate --noinput &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2"
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120 --access-logfile - --error-logfile -"
     ports:
       - "8000:8000"
+    volumes:
+      - media_data:/app/media
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   postgres_data:
+  media_data:

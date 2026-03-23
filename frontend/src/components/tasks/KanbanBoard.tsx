@@ -618,7 +618,7 @@ export function KanbanBoard({
     >
       <div
         key={boardWorkspaceId}
-        className="rounded-xl border border-border/40 bg-muted/25 p-4"
+        className="rounded-2xl border border-border/50 bg-muted/35 p-4 shadow-inner shadow-black/[0.03]"
       >
         <div className="flex gap-0 divide-x divide-border/60 overflow-x-auto overflow-y-visible pb-1 [scrollbar-width:thin]">
           {columns

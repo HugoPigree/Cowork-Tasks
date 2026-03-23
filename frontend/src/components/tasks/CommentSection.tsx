@@ -6,6 +6,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ApiError, tasksApi } from "@/lib/api"
 import type { TaskComment } from "@/lib/types"
 import { UserAvatar } from "@/components/UserAvatar"
+import { FORMATTED_MULTILINE } from "@/lib/formattedText"
+import { cn } from "@/lib/utils"
 
 type Props = {
   taskId: number | null
@@ -67,7 +69,7 @@ export function CommentSection({ taskId, open }: Props) {
         ) : null}
       </div>
       <ScrollArea className="max-h-[min(200px,35vh)] rounded-md border border-border/60 bg-muted/20 dark:bg-muted/10">
-        <ul className="space-y-5 p-4">
+        <ul className="space-y-6 p-4">
           {comments.length === 0 && !loading ? (
             <li className="text-sm leading-relaxed text-muted-foreground">
               Aucun commentaire pour l’instant — utilisez le champ ci-dessous.
@@ -83,9 +85,9 @@ export function CommentSection({ taskId, open }: Props) {
                     firstName={c.author.first_name}
                   />
                 </span>
-                <div className="min-w-0 flex-1 space-y-1">
+                <div className="min-w-0 flex-1 space-y-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0">
-                    <span className="text-sm font-medium text-foreground">
+                    <span className="text-sm font-semibold text-foreground">
                       @{c.author.username}
                     </span>
                     <time
@@ -98,7 +100,12 @@ export function CommentSection({ taskId, open }: Props) {
                       })}
                     </time>
                   </div>
-                  <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">
+                  <p
+                    className={cn(
+                      FORMATTED_MULTILINE,
+                      "max-w-[65ch] text-foreground"
+                    )}
+                  >
                     {c.body}
                   </p>
                 </div>
@@ -109,7 +116,7 @@ export function CommentSection({ taskId, open }: Props) {
       </ScrollArea>
       <form
         onSubmit={(e) => void handleSend(e)}
-        className="space-y-2 rounded-md border border-border/60 bg-background p-3 shadow-sm"
+        className="space-y-3 rounded-xl border border-border/60 bg-card p-4 shadow-sm"
       >
         <label
           className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
@@ -122,8 +129,11 @@ export function CommentSection({ taskId, open }: Props) {
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Écrire un commentaire…"
-          rows={3}
-          className="min-h-[88px] resize-none text-[15px] leading-normal"
+          rows={4}
+          className={cn(
+            FORMATTED_MULTILINE,
+            "min-h-[104px] resize-y"
+          )}
         />
         <div className="flex justify-end pt-0.5">
           <Button type="submit" size="sm" disabled={sending || !body.trim()}>

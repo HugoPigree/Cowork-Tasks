@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useEffect } from "react"
+import { useForm } from "react-hook-form"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -8,8 +10,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -18,7 +27,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import type { Task, TaskPriority, WorkspaceMember } from "@/lib/types"
+import { FORMATTED_MULTILINE } from "@/lib/formattedText"
+import { taskFormSchema, type TaskFormValues } from "@/lib/schemas"
+import type { Sprint, Task, TaskPriority, WorkspaceMember } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 function toDatetimeLocal(iso: string | null): string {
   if (!iso) return ""
@@ -27,13 +39,34 @@ function toDatetimeLocal(iso: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-type SavePayload = {
+function taskToDefaults(task: Task | null): TaskFormValues {
+  if (!task) {
+    return {
+      title: "",
+      description: "",
+      priority: "medium",
+      dueLocal: "",
+      assigneeKey: "__none__",
+      sprintKey: "__none__",
+    }
+  }
+  return {
+    title: task.title,
+    description: task.description ?? "",
+    priority: task.priority,
+    dueLocal: toDatetimeLocal(task.due_date),
+    assigneeKey: task.assignee ? String(task.assignee.id) : "__none__",
+    sprintKey: task.sprint ? String(task.sprint.id) : "__none__",
+  }
+}
+
+export type TaskSavePayload = {
   title: string
   description: string
   priority: TaskPriority
   due_date: string | null
   assignee_id: number | null
-  /** Création : colonne cible (GitHub Projects) */
+  sprint_id: number | null
   board_column_id?: number
 }
 
@@ -42,8 +75,8 @@ type Props = {
   onOpenChange: (open: boolean) => void
   task: Task | null
   members: WorkspaceMember[]
-  onSave: (data: SavePayload) => Promise<void>
-  /** Création depuis une colonne du tableau */
+  sprints: Sprint[]
+  onSave: (data: TaskSavePayload) => Promise<void>
   defaultColumnId?: number
 }
 
@@ -52,139 +85,211 @@ export function TaskFormDialog({
   onOpenChange,
   task,
   members,
+  sprints,
   onSave,
   defaultColumnId,
 }: Props) {
-  const [title, setTitle] = useState("")
-  const [description, setDescription] = useState("")
-  const [priority, setPriority] = useState<TaskPriority>("medium")
-  const [dueLocal, setDueLocal] = useState("")
-  const [assigneeKey, setAssigneeKey] = useState<string>("__none__")
-  const [loading, setLoading] = useState(false)
+  const form = useForm<TaskFormValues>({
+    resolver: zodResolver(taskFormSchema),
+    defaultValues: taskToDefaults(task),
+  })
 
   useEffect(() => {
     if (!open) return
-    if (task) {
-      setTitle(task.title)
-      setDescription(task.description)
-      setPriority(task.priority)
-      setDueLocal(toDatetimeLocal(task.due_date))
-      setAssigneeKey(
-        task.assignee ? String(task.assignee.id) : "__none__"
-      )
-    } else {
-      setTitle("")
-      setDescription("")
-      setPriority("medium")
-      setDueLocal("")
-      setAssigneeKey("__none__")
-    }
-  }, [open, task, defaultColumnId])
+    form.reset(taskToDefaults(task))
+  }, [open, task, form])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true)
-    try {
-      const assignee_id =
-        assigneeKey === "__none__" ? null : parseInt(assigneeKey, 10)
-      await onSave({
-        title,
-        description,
-        priority,
-        due_date: dueLocal ? new Date(dueLocal).toISOString() : null,
-        assignee_id,
-        board_column_id:
-          !task && defaultColumnId != null ? defaultColumnId : undefined,
-      })
-      onOpenChange(false)
-    } finally {
-      setLoading(false)
-    }
+  async function onSubmit(values: TaskFormValues) {
+    const assignee_id =
+      values.assigneeKey === "__none__"
+        ? null
+        : parseInt(values.assigneeKey, 10)
+    const sprint_id =
+      values.sprintKey === "__none__" ? null : parseInt(values.sprintKey, 10)
+    await onSave({
+      title: values.title.trim(),
+      description: values.description,
+      priority: values.priority,
+      due_date: values.dueLocal
+        ? new Date(values.dueLocal).toISOString()
+        : null,
+      assignee_id,
+      sprint_id,
+      board_column_id:
+        !task && defaultColumnId != null ? defaultColumnId : undefined,
+    })
+    onOpenChange(false)
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>{task ? "Modifier la tâche" : "Nouvelle tâche"}</DialogTitle>
-            <DialogDescription>
-              Assignez un membre de l&apos;espace pour clarifier qui livre la tâche.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="title">Titre</Label>
-              <Input
-                id="title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ex. Intégration API"
-                required
+      <DialogContent className="sm:max-w-lg sm:rounded-xl">
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)}>
+            <DialogHeader>
+              <DialogTitle className="text-lg">
+                {task ? "Modifier la tâche" : "Nouvelle tâche"}
+              </DialogTitle>
+              <DialogDescription className="text-[13px] leading-relaxed">
+                Assignez un membre et un sprint pour clarifier le périmètre.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <FormField
+                control={form.control}
+                name="title"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Titre</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Ex. Intégration API" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Contexte, critères d’acceptation…"
+                        rows={6}
+                        className={cn(
+                          FORMATTED_MULTILINE,
+                          "min-h-[148px] resize-y"
+                        )}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="assigneeKey"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Assigné à</FormLabel>
+                    <Select
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choisir…" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Non assigné</SelectItem>
+                        {members.map((m) => (
+                          <SelectItem key={m.id} value={String(m.user.id)}>
+                            {m.user.username}
+                            {m.role === "owner" ? " (owner)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="sprintKey"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Sprint</FormLabel>
+                    <Select
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choisir…" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Aucun sprint</SelectItem>
+                        {sprints.map((s) => (
+                          <SelectItem key={s.id} value={String(s.id)}>
+                            <span className="flex items-center gap-2">
+                              <span
+                                className="h-2 w-2 rounded-full"
+                                style={{ backgroundColor: s.color }}
+                                aria-hidden
+                              />
+                              {s.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="priority"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Priorité</FormLabel>
+                    <Select
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="low">Basse</SelectItem>
+                        <SelectItem value="medium">Moyenne</SelectItem>
+                        <SelectItem value="high">Haute</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="dueLocal"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Échéance (optionnel)</FormLabel>
+                    <FormControl>
+                      <Input type="datetime-local" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="desc">Description</Label>
-              <Textarea
-                id="desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Contexte, liens, critères d’acceptation…"
-                rows={3}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Assigné à</Label>
-              <Select value={assigneeKey} onValueChange={setAssigneeKey}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choisir…" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Non assigné (backlog)</SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.id} value={String(m.user.id)}>
-                      {m.user.username}
-                      {m.role === "owner" ? " (owner)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Priorité</Label>
-              <Select
-                value={priority}
-                onValueChange={(v) => setPriority(v as TaskPriority)}
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Basse</SelectItem>
-                  <SelectItem value="medium">Moyenne</SelectItem>
-                  <SelectItem value="high">Haute</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="due">Échéance (optionnel)</Label>
-              <Input
-                id="due"
-                type="datetime-local"
-                value={dueLocal}
-                onChange={(e) => setDueLocal(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Annuler
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? "…" : task ? "Enregistrer" : "Créer"}
-            </Button>
-          </DialogFooter>
-        </form>
+                Annuler
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting
+                  ? "…"
+                  : task
+                    ? "Enregistrer"
+                    : "Créer"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   )

@@ -1,6 +1,8 @@
 """
 DRF serializers — validation errors surface as HTTP 400 with field details.
 """
+import re
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.db.models import Max
@@ -11,6 +13,7 @@ from core.avatar_utils import user_avatar_absolute_url
 from core.models import (
     Board,
     BoardColumn,
+    Sprint,
     Task,
     TaskComment,
     Workspace,
@@ -22,6 +25,30 @@ from core.models import (
 )
 
 User = get_user_model()
+
+_HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+class SprintSerializer(serializers.ModelSerializer):
+    """Sprint CRUD payload (scoped to workspace via URL)."""
+
+    class Meta:
+        model = Sprint
+        fields = ("id", "name", "color", "created_at")
+        read_only_fields = ("id", "created_at")
+
+    def validate_color(self, value):
+        if not _HEX_COLOR.match((value or "").strip()):
+            raise serializers.ValidationError(
+                "Couleur hex sur 6 caractères requise (ex. #6366f1)."
+            )
+        return (value or "").strip()
+
+
+class SprintBriefSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Sprint
+        fields = ("id", "name", "color")
 
 
 class UserBriefSerializer(serializers.ModelSerializer):
@@ -223,6 +250,12 @@ class TaskSerializer(serializers.ModelSerializer):
 
     created_by = UserBriefSerializer(read_only=True)
     assignee = UserBriefSerializer(read_only=True, allow_null=True)
+    sprint = SprintBriefSerializer(read_only=True, allow_null=True)
+    sprint_id = serializers.IntegerField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
     assignee_id = serializers.IntegerField(
         write_only=True,
         required=False,
@@ -260,6 +293,8 @@ class TaskSerializer(serializers.ModelSerializer):
             "subtask_count",
             "board_column",
             "board_column_id",
+            "sprint",
+            "sprint_id",
             "depends_on",
             "depends_on_ids",
             "is_blocked",
@@ -280,6 +315,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "created_at",
             "created_by",
             "assignee",
+            "sprint",
             "subtask_count",
             "board_column",
             "depends_on",
@@ -343,6 +379,15 @@ class TaskSerializer(serializers.ModelSerializer):
             ).exists():
                 raise serializers.ValidationError(
                     {"assignee_id": "Assignee must be a member of this workspace."}
+                )
+
+        if "sprint_id" in attrs and workspace:
+            sid = attrs["sprint_id"]
+            if sid is not None and not Sprint.objects.filter(
+                pk=sid, workspace_id=workspace.id
+            ).exists():
+                raise serializers.ValidationError(
+                    {"sprint_id": "Sprint introuvable pour cet espace."}
                 )
 
         parent_id = attrs.get("parent_id", serializers.empty)
