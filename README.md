@@ -148,7 +148,30 @@ The Docker image runs **Gunicorn**, **WhiteNoise** (collected `/static/` for the
 1. **`.env`** (never commit): set a strong `SECRET_KEY` (`openssl rand -base64 48`), `DB_PASSWORD`, and **`ALLOWED_HOSTS`** to your real domain(s). Django refuses the default `django-insecure-change-me-in-production` when `DEBUG=False`.
 2. **`CORS_ALLOWED_ORIGINS`**: exact origins of the SPA (e.g. `https://app.example.com`).
 3. **`CSRF_TRUSTED_ORIGINS`**: same-style URLs for Django **admin** over HTTPS (e.g. `https://api.example.com` if admin is used on the API host).
-4. **HTTPS**: terminate TLS with **Caddy**, **Traefik**, or **nginx** in front of Gunicorn. Set `DJANGO_TRUST_X_FORWARDED_PROTO=true` (default in Compose) so Django sees `https`. Then enable `DJANGO_SESSION_COOKIE_SECURE=true` and optionally `DJANGO_SECURE_SSL_REDIRECT=true` / HSTS (`DJANGO_SECURE_HSTS_SECONDS`) once everything works.
+### Docker Compose (Développement local)
+
+Pour lancer toute la pile localement sans Traefik (recommandé pour le dev) :
+```bash
+docker compose up --build
+```
+L'application est alors accessible sur :
+- Frontend : [http://localhost:8080](http://localhost:8080)
+- API (Swagger) : [http://localhost:8000/api/docs/](http://localhost:8000/api/docs/)
+
+### Production (avec Traefik)
+
+Pour la production, utilisez le fichier de surcharge `docker-compose.prod.yml` qui contient les labels Traefik et la configuration du réseau externe `web` :
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+Assurez-vous d'avoir créé le réseau externe `web` au préalable :
+```bash
+docker network create web
+```
+
+### 4. **HTTPS**
+Terminez le TLS avec **Traefik** (configuré via `docker-compose.prod.yml`). 
+
 5. **Frontend**: `cd frontend && cp .env.production.example .env.production`, set `VITE_API_BASE` to the public API origin, then `npm run build`. Serve `frontend/dist/` as static files (see `deploy/nginx.example.conf`).
 6. **Scale / hardening**: for heavy traffic, set `DJANGO_SERVE_MEDIA=false` and serve `/media/` from nginx or object storage (S3-compatible); adjust Gunicorn `--workers` (e.g. `(2 × CPU) + 1`).
 

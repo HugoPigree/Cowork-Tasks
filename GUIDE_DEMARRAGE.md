@@ -42,9 +42,19 @@ compose-up.cmd up --build -d
 
 ---
 
-## Production ou surcharge (fichier `.env`)
+## Production (avec Traefik)
 
-Pour un **vrai déploiement**, copie **`.env.example`** vers **`.env`** et renseigne au minimum **`SECRET_KEY`** et **`DB_PASSWORD`**. Docker Compose lit le `.env` à la racine pour **substituer** les variables du `docker-compose.yml` (elles remplacent les défauts).
+Pour un **déploiement réel** avec Traefik (HTTPS, noms de domaine), utilisez le fichier de surcharge dédié :
+
+```bash
+# 1. Créer le réseau externe si besoin
+docker network create web
+
+# 2. Lancer avec les deux fichiers
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+Pensez également à copier **`.env.example`** vers **`.env`** et à renseigne au minimum **`SECRET_KEY`**, **`DB_PASSWORD`** et **`DOMAIN`**. Docker Compose lit le `.env` à la racine pour **substituer** les variables.
 
 ---
 
