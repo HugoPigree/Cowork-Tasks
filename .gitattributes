@@ -1,0 +1,2 @@
+# Shell entrypoints must use LF for Docker (Linux) builds
+*.sh text eol=lf

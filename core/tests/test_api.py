@@ -289,25 +289,27 @@ def test_workspace_add_member(api_client, user_a, user_b, workspace_a):
 
 
 @pytest.mark.django_db
-def test_workspace_admin_cannot_add_member_if_not_creator(
-    api_client, user_a, user_b, workspace_a
-):
+def test_workspace_member_can_invite_others(api_client, user_a, user_b, workspace_a):
     WorkspaceMembership.objects.create(
         workspace=workspace_a,
         user=user_b,
-        role=WorkspaceMembership.Role.ADMIN,
+        role=WorkspaceMembership.Role.MEMBER,
     )
+    User.objects.create_user(username="carol", password="secret12345")
     api_client.force_authenticate(user=user_b)
     r = api_client.post(
         f"/api/workspaces/{workspace_a.id}/add_member/",
-        {"username": "alice"},
+        {"username": "carol"},
         format="json",
     )
-    assert r.status_code == status.HTTP_403_FORBIDDEN
+    assert r.status_code == status.HTTP_201_CREATED
+    assert WorkspaceMembership.objects.filter(
+        workspace=workspace_a, user__username="carol"
+    ).exists()
 
 
 @pytest.mark.django_db
-def test_workspace_creator_can_patch_and_delete(
+def test_workspace_any_member_can_patch_and_delete(
     api_client, user_a, user_b, workspace_a
 ):
     api_client.force_authenticate(user=user_a)
@@ -324,17 +326,18 @@ def test_workspace_creator_can_patch_and_delete(
     WorkspaceMembership.objects.create(
         workspace=workspace_a,
         user=user_b,
-        role=WorkspaceMembership.Role.ADMIN,
+        role=WorkspaceMembership.Role.MEMBER,
     )
     api_client.force_authenticate(user=user_b)
-    denied = api_client.patch(
+    r2 = api_client.patch(
         f"/api/workspaces/{workspace_a.id}/",
-        {"name": "Hack"},
+        {"name": "By Bob"},
         format="json",
     )
-    assert denied.status_code == status.HTTP_403_FORBIDDEN
+    assert r2.status_code == status.HTTP_200_OK
+    workspace_a.refresh_from_db()
+    assert workspace_a.name == "By Bob"
 
-    api_client.force_authenticate(user=user_a)
     delete_r = api_client.delete(f"/api/workspaces/{workspace_a.id}/")
     assert delete_r.status_code == status.HTTP_204_NO_CONTENT
     assert not Workspace.objects.filter(pk=workspace_a.id).exists()

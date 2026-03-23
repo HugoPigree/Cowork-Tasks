@@ -29,9 +29,7 @@ from core.models import (
 )
 from core.permissions import (
     IsTaskWorkspaceMember,
-    IsWorkspaceCreator,
     IsWorkspaceMember,
-    IsWorkspaceOwnerOrAdmin,
 )
 from core.serializers import (
     AddWorkspaceMemberSerializer,
@@ -118,7 +116,7 @@ class MeView(APIView):
 class WorkspaceViewSet(viewsets.ModelViewSet):
     """
     List/create workspaces the user belongs to.
-    Only the workspace creator can rename/delete it and invite/remove members.
+    Any member of a workspace can manage it (rename, delete, invites, board columns).
     """
 
     serializer_class = WorkspaceSerializer
@@ -140,15 +138,15 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return [IsAuthenticated(), IsWorkspaceMember()]
         if self.action in ("update", "partial_update"):
-            return [IsAuthenticated(), IsWorkspaceCreator()]
+            return [IsAuthenticated(), IsWorkspaceMember()]
         if self.action == "destroy":
-            return [IsAuthenticated(), IsWorkspaceCreator()]
+            return [IsAuthenticated(), IsWorkspaceMember()]
         if self.action in ("members", "board", "sprints", "sprint_destroy"):
             return [IsAuthenticated(), IsWorkspaceMember()]
         if self.action == "add_member":
-            return [IsAuthenticated(), IsWorkspaceCreator()]
+            return [IsAuthenticated(), IsWorkspaceMember()]
         if self.action == "remove_member":
-            return [IsAuthenticated(), IsWorkspaceCreator()]
+            return [IsAuthenticated(), IsWorkspaceMember()]
         return [IsAuthenticated()]
 
     def perform_create(self, serializer):
@@ -180,7 +178,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path=r"board/columns",
-        permission_classes=[IsAuthenticated, IsWorkspaceOwnerOrAdmin],
+        permission_classes=[IsAuthenticated, IsWorkspaceMember],
     )
     def board_column_create(self, request, pk=None):
         workspace = self.get_object()
@@ -197,7 +195,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["patch"],
         url_path=r"board/columns/(?P<col_id>\d+)",
-        permission_classes=[IsAuthenticated, IsWorkspaceOwnerOrAdmin],
+        permission_classes=[IsAuthenticated, IsWorkspaceMember],
     )
     def board_column_update(self, request, pk=None, col_id=None):
         workspace = self.get_object()
@@ -214,7 +212,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["delete"],
         url_path=r"board/columns/(?P<col_id>\d+)",
-        permission_classes=[IsAuthenticated, IsWorkspaceOwnerOrAdmin],
+        permission_classes=[IsAuthenticated, IsWorkspaceMember],
     )
     def board_column_delete(self, request, pk=None, col_id=None):
         workspace = self.get_object()
@@ -234,7 +232,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path="board/reorder_columns",
-        permission_classes=[IsAuthenticated, IsWorkspaceOwnerOrAdmin],
+        permission_classes=[IsAuthenticated, IsWorkspaceMember],
     )
     def board_reorder_columns(self, request, pk=None):
         workspace = self.get_object()
@@ -295,7 +293,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         qs = workspace.memberships.select_related("user").order_by("joined_at")
         return Response(WorkspaceMemberSerializer(qs, many=True).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, IsWorkspaceCreator])
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, IsWorkspaceMember])
     def add_member(self, request, pk=None):
         workspace = self.get_object()
         ser = AddWorkspaceMemberSerializer(data=request.data)
@@ -326,20 +324,22 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["delete"],
         url_path=r"members/(?P<user_id>\d+)",
-        permission_classes=[IsAuthenticated, IsWorkspaceCreator],
+        permission_classes=[IsAuthenticated, IsWorkspaceMember],
     )
     def remove_member(self, request, pk=None, user_id=None):
         workspace = self.get_object()
         target_id = int(user_id)
         if target_id == request.user.id:
             return Response(
-                {"detail": "Owners cannot remove themselves this way; transfer ownership first (not implemented)."},
+                {
+                    "detail": "Vous ne pouvez pas vous retirer vous-même avec cet endpoint.",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         deleted, _ = WorkspaceMembership.objects.filter(
             workspace=workspace,
             user_id=target_id,
-        ).exclude(role=WorkspaceMembership.Role.OWNER).delete()
+        ).delete()
         if not deleted:
             return Response(status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)

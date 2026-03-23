@@ -1,0 +1,7 @@
+# Vite dev server with HMR — used by docker compose --profile dev
+FROM node:20-alpine
+WORKDIR /app
+COPY docker-entrypoint-dev.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

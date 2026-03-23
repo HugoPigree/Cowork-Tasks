@@ -72,9 +72,7 @@ export function TasksPage() {
   const [sprints, setSprints] = useState<Sprint[]>([])
   const [sprintManageOpen, setSprintManageOpen] = useState(false)
 
-  const canManageBoardColumns =
-    currentWorkspace?.my_role === "owner" ||
-    currentWorkspace?.my_role === "admin"
+  const canManageBoardColumns = Boolean(currentWorkspace)
 
   function openNewTask(columnId?: number) {
     setEditing(null)
@@ -356,15 +354,15 @@ export function TasksPage() {
               </Select>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link to="/workspaces" className="gap-1">
-                <Settings2 className="h-4 w-4" />
-                Espaces
-              </Link>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
               <Link to="/aide-creation-uc" className="gap-1">
                 <Sparkles className="h-4 w-4" />
                 Aide UC
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/workspaces" className="gap-1">
+                <Settings2 className="h-4 w-4" />
+                Espaces
               </Link>
             </Button>
             <UserAccountMenu />

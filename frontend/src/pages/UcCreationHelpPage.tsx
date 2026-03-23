@@ -2,17 +2,22 @@ import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import {
+  ArrowLeft,
   CheckSquare2,
   Copy,
   ExternalLink,
   Loader2,
   Settings2,
   Sparkles,
+  Trash2,
   Upload,
 } from "lucide-react"
 import { UserAccountMenu } from "@/components/layout/UserAccountMenu"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -27,9 +32,22 @@ import { workspacesApi } from "@/lib/api"
 import { backlogColumnId } from "@/lib/backlogColumn"
 import { UC_CREATION_PROMPT } from "@/lib/ucCreationPrompt"
 import { createUCs } from "@/lib/ucImportCreate"
-import { validateImportedUcJson } from "@/lib/ucImportValidation"
+import {
+  validateImportedUcArray,
+  validateImportedUcJson,
+  type ImportedUc,
+} from "@/lib/ucImportValidation"
 import type { BoardColumn } from "@/lib/types"
 import { cn } from "@/lib/utils"
+
+type PreviewUcRow = ImportedUc & { clientKey: string }
+
+function newClientKey(fallbackIndex: number) {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID()
+  }
+  return `uc-${Date.now()}-${fallbackIndex}`
+}
 
 const STEPS = [
   {
@@ -45,7 +63,7 @@ const STEPS = [
   {
     title: "3. Importer dans le backlog",
     detail:
-      "Collez le JSON ci-dessous et cliquez sur « Importer les UC ». Les tâches seront créées dans la colonne Backlog (ou la première colonne) de l’espace sélectionné.",
+      "Collez le JSON, cliquez sur « Prévisualiser et modifier », ajustez chaque UC si besoin, puis « Valider et importer ». Les tâches partent dans la colonne Backlog (ou la première colonne) de l’espace sélectionné.",
   },
 ]
 
@@ -74,6 +92,8 @@ export function UcCreationHelpPage() {
   const [previewFormatted, setPreviewFormatted] = useState<string | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  const [importPhase, setImportPhase] = useState<"json" | "preview">("json")
+  const [previewItems, setPreviewItems] = useState<PreviewUcRow[]>([])
 
   useEffect(() => {
     if (!currentWorkspaceId) {
@@ -127,7 +147,46 @@ export function UcCreationHelpPage() {
     window.open("https://chat.openai.com", "_blank", "noopener,noreferrer")
   }, [])
 
-  const handleImport = useCallback(async () => {
+  const goToPreview = useCallback(() => {
+    const stripped = stripMarkdownCodeFence(jsonInput)
+    const parsed = validateImportedUcJson(stripped)
+    if (!parsed.ok) {
+      toast.error(parsed.message)
+      setPreviewError(parsed.message)
+      return
+    }
+    setPreviewError(null)
+    setPreviewItems(
+      parsed.items.map((item, i) => ({
+        ...item,
+        dependencies: [...item.dependencies],
+        comments: [...item.comments],
+        clientKey: newClientKey(i),
+      }))
+    )
+    setImportPhase("preview")
+  }, [jsonInput])
+
+  const goBackToJson = useCallback(() => {
+    setImportPhase("json")
+  }, [])
+
+  const updatePreviewItem = useCallback(
+    (index: number, patch: Partial<ImportedUc>) => {
+      setPreviewItems((prev) =>
+        prev.map((row, i) =>
+          i === index ? { ...row, ...patch, clientKey: row.clientKey } : row
+        )
+      )
+    },
+    []
+  )
+
+  const removePreviewItem = useCallback((index: number) => {
+    setPreviewItems((prev) => prev.filter((_, i) => i !== index))
+  }, [])
+
+  const handleConfirmImport = useCallback(async () => {
     if (!currentWorkspaceId) {
       toast.error("Sélectionnez un espace de travail")
       return
@@ -140,18 +199,24 @@ export function UcCreationHelpPage() {
       return
     }
 
-    const stripped = stripMarkdownCodeFence(jsonInput)
-    const parsed = validateImportedUcJson(stripped)
-    if (!parsed.ok) {
-      toast.error(parsed.message)
-      setPreviewError(parsed.message)
+    const rowsForApi: unknown[] = previewItems.map(
+      ({ clientKey: _k, ...rest }) => rest
+    )
+    const checked = validateImportedUcArray(rowsForApi)
+    if (!checked.ok) {
+      toast.error(checked.message)
+      return
+    }
+
+    if (checked.items.length === 0) {
+      toast.error("Ajoutez au moins une UC à importer.")
       return
     }
 
     setImporting(true)
     try {
       const { created, failures } = await createUCs(
-        parsed.items,
+        checked.items,
         currentWorkspaceId,
         colId
       )
@@ -160,6 +225,8 @@ export function UcCreationHelpPage() {
         setJsonInput("")
         setPreviewFormatted(null)
         setPreviewError(null)
+        setPreviewItems([])
+        setImportPhase("json")
       } else {
         toast.error(
           `${created} créée(s), ${failures.length} échec(s). Voir le détail ci-dessous.`
@@ -172,7 +239,7 @@ export function UcCreationHelpPage() {
     } finally {
       setImporting(false)
     }
-  }, [columns, currentWorkspaceId, jsonInput])
+  }, [columns, currentWorkspaceId, previewItems])
 
   const backlogId = backlogColumnId(columns)
   const backlogName =
@@ -226,6 +293,10 @@ export function UcCreationHelpPage() {
                 <CheckSquare2 className="h-4 w-4" />
                 Tableau
               </Link>
+            </Button>
+            <Button variant="secondary" size="sm" className="pointer-events-none gap-1">
+              <Sparkles className="h-4 w-4" />
+              Aide UC
             </Button>
             <Button variant="outline" size="sm" asChild>
               <Link to="/workspaces" className="gap-1">
@@ -339,72 +410,198 @@ export function UcCreationHelpPage() {
 
         <Card className="border-border/60 shadow-md shadow-black/[0.06]">
           <CardHeader>
-            <CardTitle className="text-lg">Importer les UC</CardTitle>
+            <CardTitle className="text-lg">
+              {importPhase === "json"
+                ? "Importer les UC"
+                : "Prévisualisation — modifier puis valider"}
+            </CardTitle>
             <CardDescription>
-              Collez le tableau JSON renvoyé par ChatGPT (blocs{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                {"```json"}
-              </code>{" "}
-              acceptés).
+              {importPhase === "json" ? (
+                <>
+                  Collez le tableau JSON renvoyé par ChatGPT (blocs{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                    {"```json"}
+                  </code>{" "}
+                  acceptés), puis ouvrez la prévisualisation pour ajuster chaque
+                  UC avant import.
+                </>
+              ) : (
+                <>
+                  Vérifiez le titre, la description et la priorité de chaque UC.
+                  Retournez au JSON pour tout reprendre, ou validez pour créer
+                  les tâches dans le backlog.
+                </>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label
-                className="text-sm font-semibold text-foreground/90"
-                htmlFor="uc-json-input"
-              >
-                JSON
-              </label>
-              <Textarea
-                id="uc-json-input"
-                value={jsonInput}
-                onChange={(e) => setJsonInput(e.target.value)}
-                placeholder='[\n  { "title": "UC-01: …", "description": "…", … }\n]'
-                className="min-h-[200px] font-mono text-[13px] leading-relaxed"
-              />
-            </div>
+            {importPhase === "json" ? (
+              <>
+                <div className="space-y-2">
+                  <label
+                    className="text-sm font-semibold text-foreground/90"
+                    htmlFor="uc-json-input"
+                  >
+                    JSON
+                  </label>
+                  <Textarea
+                    id="uc-json-input"
+                    value={jsonInput}
+                    onChange={(e) => setJsonInput(e.target.value)}
+                    placeholder='[\n  { "title": "UC-01: …", "description": "…", … }\n]'
+                    className="min-h-[200px] font-mono text-[13px] leading-relaxed"
+                  />
+                </div>
 
-            {(previewFormatted || previewError) && (
-              <div
-                className={cn(
-                  "rounded-xl border p-4 text-sm",
-                  previewError
-                    ? "border-destructive/50 bg-destructive/5 text-destructive"
-                    : "border-emerald-500/40 bg-emerald-500/[0.06] text-foreground"
+                {(previewFormatted || previewError) && (
+                  <div
+                    className={cn(
+                      "rounded-xl border p-4 text-sm",
+                      previewError
+                        ? "border-destructive/50 bg-destructive/5 text-destructive"
+                        : "border-emerald-500/40 bg-emerald-500/[0.06] text-foreground"
+                    )}
+                  >
+                    <p className="mb-2 font-semibold">
+                      {previewError
+                        ? "Aperçu / validation"
+                        : "JSON valide — prêt pour la prévisualisation"}
+                    </p>
+                    {previewError ? (
+                      <p className="leading-relaxed">{previewError}</p>
+                    ) : (
+                      <pre className="max-h-[min(320px,40vh)] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background/80 p-3 font-mono text-xs leading-relaxed text-foreground">
+                        {previewFormatted}
+                      </pre>
+                    )}
+                  </div>
                 )}
-              >
-                <p className="mb-2 font-semibold">
-                  {previewError ? "Aperçu / validation" : "Prévisualisation OK"}
+
+                <Button
+                  type="button"
+                  onClick={goToPreview}
+                  disabled={
+                    !currentWorkspaceId ||
+                    backlogId == null ||
+                    !jsonInput.trim()
+                  }
+                  className="gap-2"
+                >
+                  Prévisualiser et modifier
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  {previewItems.length} UC à importer
+                  {previewItems.length === 0
+                    ? " — retournez au JSON ou annulez."
+                    : "."}
                 </p>
-                {previewError ? (
-                  <p className="leading-relaxed">{previewError}</p>
-                ) : (
-                  <pre className="max-h-[min(320px,40vh)] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background/80 p-3 font-mono text-xs leading-relaxed text-foreground">
-                    {previewFormatted}
-                  </pre>
-                )}
-              </div>
-            )}
+                <div className="max-h-[min(520px,60vh)] space-y-3 overflow-y-auto pr-1">
+                  {previewItems.map((uc, index) => (
+                    <div
+                      key={uc.clientKey}
+                      className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          UC #{index + 1}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary" className="text-[10px]">
+                            {uc.status}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0 text-destructive"
+                            aria-label="Retirer cette UC de l’import"
+                            onClick={() => removePreviewItem(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`uc-title-${index}`}>Titre</Label>
+                        <Input
+                          id={`uc-title-${index}`}
+                          value={uc.title}
+                          onChange={(e) =>
+                            updatePreviewItem(index, { title: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`uc-desc-${index}`}>Description</Label>
+                        <Textarea
+                          id={`uc-desc-${index}`}
+                          value={uc.description}
+                          onChange={(e) =>
+                            updatePreviewItem(index, {
+                              description: e.target.value,
+                            })
+                          }
+                          className="min-h-[100px] text-[13px] leading-relaxed"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`uc-prio-${index}`}>Priorité</Label>
+                        <Select
+                          value={uc.priority}
+                          onValueChange={(v) =>
+                            updatePreviewItem(index, {
+                              priority: v,
+                            })
+                          }
+                        >
+                          <SelectTrigger id={`uc-prio-${index}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Haute">Haute</SelectItem>
+                            <SelectItem value="Moyenne">Moyenne</SelectItem>
+                            <SelectItem value="Basse">Basse</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
-            <Button
-              type="button"
-              onClick={() => void handleImport()}
-              disabled={
-                importing ||
-                !currentWorkspaceId ||
-                backlogId == null ||
-                !jsonInput.trim()
-              }
-              className="gap-2"
-            >
-              {importing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="h-4 w-4" />
-              )}
-              Importer les UC
-            </Button>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={goBackToJson}
+                    className="gap-2"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Retour au JSON
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleConfirmImport()}
+                    disabled={
+                      importing ||
+                      !currentWorkspaceId ||
+                      backlogId == null ||
+                      previewItems.length === 0
+                    }
+                    className="gap-2"
+                  >
+                    {importing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    Valider et importer
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
       </main>

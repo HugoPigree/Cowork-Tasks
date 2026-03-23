@@ -41,3 +41,6 @@ frontend/dist/
 frontend/.env
 frontend/.env.local
 frontend/.env.*.local
+
+# Fichier npm parasite à la racine (pas de package.json ici)
+/package-lock.json

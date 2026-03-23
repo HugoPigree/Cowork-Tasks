@@ -2,11 +2,11 @@
 
 REST API for **team / coworking** task management: **workspaces** (projets), **members** (owner / member), **tasks** with **assignee**, **creator**, filters and **ordering** (priority, due date, etc.). Stack: **Django 4.2**, **DRF**, **JWT** (**simplejwt**), **PostgreSQL**. **React + Vite** + **Tailwind** + **shadcn/ui** for the SPA (espaces, membres, tableau de tâches, thème clair/sombre).
 
-Configuration uses **python-decouple** (`.env`). The stack is containerized with **Docker** and **Docker Compose** for the API.
+Configuration uses **python-decouple** (`.env` optionnel). The stack is containerized with **Docker Compose** : **PostgreSQL**, **Django (Gunicorn)** et **interface React** derrière **nginx** — déploiement local en **`docker compose up --build -d`** sans fichier `.env` obligatoire.
 
 ## Features
 
-- **Workspaces** (`/api/workspaces/`): create, list, update, delete (owner); **members** sub-resource (`GET/POST …/members/`, `DELETE …/members/<user_id>/` for owners)
+- **Workspaces** (`/api/workspaces/`): create, list, update, delete (**any member** of the workspace); **members** sub-resource (`GET/POST …/add_member/`, `DELETE …/members/<user_id>/` for any member — cannot remove yourself via this endpoint)
 - **Tasks** belong to a **workspace**; **`created_by`** (auto) and optional **`assignee`** (must be a workspace member); all **members** can CRUD tasks in that workspace
 - **Query params** on `GET /api/tasks/`: `workspace` (recommended), `status`, `priority`, `assignee` (user id or `unassigned`), `ordering` (`-priority`, `priority`, `due_date`, `-due_date`, `created_at`, `-created_at`)
 - **Registration** creates a **default personal workspace** (owner) so the UI works immediately
@@ -19,10 +19,14 @@ Configuration uses **python-decouple** (`.env`). The stack is containerized with
 task_manager/
 ├── core/                  # Main Django app (models, API, permissions)
 ├── config/                # Project settings and root URLs
-├── frontend/              # React + Vite + shadcn/ui SPA
-├── deploy/                # nginx reverse-proxy example for production
-├── Dockerfile
-├── docker-compose.yml
+├── frontend/              # React + Vite + Dockerfile (nginx + build prod)
+├── deploy/                # Exemple nginx si tu termines TLS toi-même
+├── Dockerfile             # Django / Gunicorn
+├── docker-compose.yml     # db + web + app (nginx) ; profil `dev` = Vite HMR
+├── compose-up.cmd         # Windows : raccourci vers docker compose
+├── scripts/compose-up.sh   # idem (Linux / macOS)
+├── GUIDE_DEMARRAGE.md     # guide de démarrage (FR)
+├── build-frontend.cmd     # build SPA hors Docker (Windows, npm.cmd)
 ├── requirements.txt
 ├── .env.example
 ├── manage.py
@@ -52,50 +56,75 @@ task_manager/
 
 ### Windows PowerShell : « exécution de scripts désactivée » (`npm.ps1`)
 
-Si `npm install` affiche une erreur **PSSecurityException** / scripts désactivés :
+Si `npm` affiche **PSSecurityException** / impossible de charger `npm.ps1` :
 
-- **Sans changer la politique** : appelle l’exécutable CMD plutôt que le script PowerShell :
+- **Sans changer la politique** : utilise **`npm.cmd`** (invite CMD ou PowerShell) :
 
   ```powershell
+  cd frontend
   npm.cmd install
   npm.cmd run dev
+  npm.cmd run build
   ```
 
-- **Ou** (une fois, pour ton utilisateur) autoriser les scripts locaux signés :
+- **Depuis la racine du dépôt** (sans entrer dans `frontend/`) : double-clique ou lance **`build-frontend.cmd`** — il enchaîne `cd frontend` + `npm.cmd run build`.
+
+- **Ou** (une fois, pour ton utilisateur) :
 
   ```powershell
   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
   ```
 
-  Puis `npm install` fonctionnera comme d’habitude.
+  Ensuite `npm install` / `npm run build` fonctionnent comme d’habitude.
+
+> Le build du front se fait dans le dossier **`frontend/`** : à la racine du repo il n’y a pas de `package.json`, donc utilise `cd frontend` ou `build-frontend.cmd`.
 
 Optional: set `VITE_API_BASE` in `frontend/.env` if the API is on another origin — use the **origin only** (e.g. `http://localhost:8000`), not `.../api`, since request paths already include `/api/`. Ensure `CORS_ALLOWED_ORIGINS` in Django `.env` includes your dev URL (e.g. `http://localhost:5173`).
 
-Production build: `npm run build` then `npm run preview` (preview also proxies `/api` to port 8000 by default).
+Production build: `cd frontend` puis `npm.cmd run build`, ou **`build-frontend.cmd`** à la racine ; puis `npm.cmd run preview` dans `frontend/` (preview proxifie `/api` vers le port 8000 par défaut).
 
 > The task list pagination in the UI assumes **page size 10** (Django `API_PAGE_SIZE` default). If you change `API_PAGE_SIZE`, update the constant in `frontend/src/pages/TasksPage.tsx` accordingly.
 
-## Quick start (Docker)
+## Quick start (Docker) — prod et dev entièrement conteneurisés
 
-1. Copy environment file and edit secrets:
+> **Guide pas à pas en français :** **[`GUIDE_DEMARRAGE.md`](./GUIDE_DEMARRAGE.md)**
 
-   ```bash
-   cp .env.example .env
-   ```
+### Une commande (local, sans `.env` obligatoire)
 
-   Set `SECRET_KEY`, `DB_PASSWORD`, and (for production) tighten `ALLOWED_HOSTS`.
+Postgres + Django + build Vite + nginx démarrent avec des **valeurs par défaut** définies dans `docker-compose.yml` :
 
-2. Build and run:
+```bash
+docker compose up --build -d
+```
 
-   ```bash
-   docker compose up --build
-   ```
+Puis ouvre **`http://localhost:8080`** (interface) et **`http://localhost:8000`** (API). Les migrations s’exécutent au démarrage du service `web`.
 
-3. Apply migrations run automatically via the `web` service command. API base URL: `http://localhost:8000/api/`.
+**Production / secrets :** copie **`.env.example`** → **`.env`** et définis **`SECRET_KEY`**, **`DB_PASSWORD`**, etc. Les variables du `.env` **remplacent** les défauts Compose.
+
+Raccourcis : **`compose-up.cmd`** (Windows) ou **`./scripts/compose-up.sh`** — équivalent à `docker compose`.
+
+### Développement avec HMR (Vite dans Docker, optionnel)
+
+Ajoute le profil **`dev`** pour lancer aussi **`frontend-dev`** (en plus de **`app`**) :
+
+```bash
+docker compose --profile dev up --build
+```
+
+UI HMR : **`http://localhost:5173`**. L’UI nginx reste sur **8080** si tu ne arrêtes pas le service `app`.
+
+### Récap des services
+
+| Commande | Services typiques | UI principale |
+|----------|-------------------|---------------|
+| `docker compose up -d` | `db`, `web`, `app` | **`http://localhost:8080`** |
+| `docker compose --profile dev up` | + `frontend-dev` | **5173** (HMR) + 8080 |
+
+Les builds / `npm run dev` s’exécutent **dans les images** ; Node sur la machine n’est pas requis pour cette stack.
 
 ### Browser shows “invalid response” on localhost?
 
-The API is **HTTP only** (no TLS inside the container). Open **`http://`** explicitly, not **`https://`**. Some embedded browsers default to HTTPS and then fail against Gunicorn.
+With **full Compose**, l’app web est sur **`http://localhost:8080`** (ou `APP_PORT`). L’API est aussi joignable **directement** sur **`http://localhost:8000`** (utile avec `npm run dev` sur Vite). Sans TLS devant nginx, reste en **`http://`**.
 
 ### Sprints : `404` sur `/api/workspaces/<id>/sprints/` ?
 
@@ -104,9 +133,9 @@ L’URL affichée dans l’UI (ex. `/api/workspaces/1/sprints/`) est **correcte*
 - En local : à la racine du repo, `python manage.py migrate` puis redémarrez `runserver`.
 - Docker : `docker compose build web && docker compose up` (ou `--build`) pour inclure le dernier code ; les migrations tournent au démarrage du service `web`.
 
-Quick check (should show JSON `{"status":"ok"}` in the browser):
+Quick check (JSON `{"status":"ok"}`) :
 
-`http://localhost:8000/api/health/`
+- Stack complète : `http://localhost:8080/api/health/` (ou `http://localhost:${APP_PORT}/api/health/`)
 
 This route uses Django’s `JsonResponse` (not DRF) so it still returns **200** when the browser sends `Accept: text/html`. After changing code, run `docker compose up --build` so the container picks up the latest image.
 

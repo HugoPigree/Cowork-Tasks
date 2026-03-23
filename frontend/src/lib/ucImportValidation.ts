@@ -49,6 +49,13 @@ export function validateImportedUcJson(raw: string): ValidateUcJsonResult {
     }
   }
 
+  return validateImportedUcArray(data as unknown[])
+}
+
+/**
+ * Valide un tableau d’UC déjà parsé (JSON ou saisie après prévisualisation).
+ */
+export function validateImportedUcArray(data: unknown[]): ValidateUcJsonResult {
   if (data.length === 0) {
     return { ok: false, message: "Le tableau ne contient aucune UC." }
   }

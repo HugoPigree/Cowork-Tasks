@@ -200,7 +200,7 @@ export function WorkspacesPage() {
   }
 
   async function onAddMemberSubmit(values: AddMemberFormValues) {
-    if (!membersWsId || !activeWs || !isCreator(activeWs)) return
+    if (!membersWsId || !activeWs) return
     try {
       await workspacesApi.addMember(membersWsId, values.username.trim())
       toast.success("Membre ajouté")
@@ -315,36 +315,34 @@ export function WorkspacesPage() {
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                      {creator ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              aria-label="Actions sur l&apos;espace"
-                            >
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              className="gap-2"
-                              onClick={() => openEdit(w)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                              Renommer…
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="gap-2 text-destructive focus:text-destructive"
-                              onClick={() => setDeleteTarget(w)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Supprimer l&apos;espace…
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      ) : null}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label="Actions sur l&apos;espace"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="gap-2"
+                            onClick={() => openEdit(w)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Renommer…
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="gap-2 text-destructive focus:text-destructive"
+                            onClick={() => setDeleteTarget(w)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Supprimer l&apos;espace…
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                       <Button
                         variant="outline"
                         size="sm"
@@ -383,8 +381,8 @@ export function WorkspacesPage() {
                 <DialogTitle className="text-lg">Nouvel espace de travail</DialogTitle>
                 <DialogDescription className="text-[13px] leading-relaxed">
                   Un espace = un projet ou une équipe. Vous serez créateur et
-                  owner ; seul le créateur peut inviter, renommer ou supprimer
-                  l&apos;espace.
+                  owner ; tout membre invité peut gérer l&apos;espace comme vous
+                  (tâches, colonnes, invitations, renommer ou supprimer).
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
@@ -543,20 +541,12 @@ export function WorkspacesPage() {
           <DialogHeader>
             <DialogTitle className="text-lg">Membres — {activeWs?.name}</DialogTitle>
             <DialogDescription className="text-[13px] leading-relaxed">
-              {activeWs && isCreator(activeWs) ? (
-                <>
-                  En tant que <strong>créateur</strong>, vous pouvez inviter ou
-                  retirer des membres.
-                </>
-              ) : (
-                <>
-                  Seul le <strong>créateur</strong> de l&apos;espace peut
-                  inviter ou retirer des membres.
-                </>
-              )}
+              Tout membre peut inviter par nom d&apos;utilisateur ou retirer
+              d&apos;autres membres (vous ne pouvez pas vous retirer vous-même
+              depuis cette liste).
             </DialogDescription>
           </DialogHeader>
-          {activeWs && isCreator(activeWs) ? (
+          {activeWs ? (
             <Form {...addMemberForm}>
               <form
                 onSubmit={addMemberForm.handleSubmit(onAddMemberSubmit)}
@@ -604,9 +594,7 @@ export function WorkspacesPage() {
                       ({m.role})
                     </span>
                   </span>
-                  {activeWs &&
-                  isCreator(activeWs) &&
-                  m.role !== "owner" ? (
+                  {activeWs && userId !== null && m.user.id !== userId ? (
                     <Button
                       type="button"
                       variant="ghost"

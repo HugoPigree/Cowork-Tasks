@@ -2,7 +2,7 @@
 Domain models: users, collaborative workspaces, and tasks inside a workspace.
 
 Tasks have a creator (`created_by`) and an optional assignee (`assignee`).
-All workspace members can view and edit tasks (coworking); only owners manage membership.
+All workspace members can view and edit tasks and manage the workspace (coworking).
 """
 from django.contrib.auth.models import AbstractUser
 from django.db import models
