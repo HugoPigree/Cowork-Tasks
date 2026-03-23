@@ -28,7 +28,7 @@ services:
     environment:
       SECRET_KEY: ${SECRET_KEY:-cowork-tasks-local-docker-only-change-me-for-any-real-deploy-9f3a2b1c}
       DEBUG: ${DEBUG:-False}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,cowork_backend,${DOMAIN:-localhost}}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,cowork_backend,${DOMAIN:-localhost}},cowork_backend,localhost,127.0.0.1
       DB_NAME: ${DB_NAME:-taskmanager}
       DB_USER: ${DB_USER:-taskmanager}
       DB_PASSWORD: ${DB_PASSWORD:-coworktasks_local}
