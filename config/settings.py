@@ -222,3 +222,7 @@ CORS_ALLOWED_ORIGINS = config(
     cast=Csv(),
 )
 CORS_ALLOW_CREDENTIALS = True
+
+# When set (e.g. Docker: SPA on 8080, API on 8000), Django redirects /, /login, /register
+# to this origin so users who open the API port still reach the React app.
+FRONTEND_ORIGIN = config("FRONTEND_ORIGIN", default="").strip()

@@ -35,14 +35,7 @@ function WorkspaceLayout() {
 export default function App() {
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={
-          <GuestOnly>
-            <LoginPage />
-          </GuestOnly>
-        }
-      />
+      <Route path="/login" element={<LoginPage />} />
       <Route
         path="/register"
         element={

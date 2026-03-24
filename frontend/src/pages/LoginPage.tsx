@@ -26,7 +26,7 @@ import { loginSchema, type LoginFormValues } from "@/lib/schemas"
 
 export function LoginPage() {
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const { login, isAuthenticated, username, logout } = useAuth()
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -45,6 +45,41 @@ export function LoginPage() {
         toast.error("Impossible de se connecter")
       }
     }
+  }
+
+  if (isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background bg-[radial-gradient(ellipse_100%_80%_at_50%_-20%,hsl(var(--primary)/0.06),transparent)] p-6">
+        <Card className="w-full max-w-[400px] border-border/50 shadow-sm">
+          <CardHeader className="space-y-1 pb-2">
+            <CardTitle className="text-xl font-semibold tracking-tight">
+              Déjà connecté
+            </CardTitle>
+            <CardDescription className="text-[13px] leading-relaxed">
+              Vous êtes connecté en tant que{" "}
+              <span className="font-medium text-foreground">{username}</span>.
+              La session est mémorisée dans ce navigateur, donc l&apos;app ne
+              vous redemandait pas les identifiants.
+            </CardDescription>
+          </CardHeader>
+          <CardFooter className="flex flex-col gap-3 pt-0">
+            <Button className="w-full" onClick={() => navigate("/", { replace: true })}>
+              Continuer vers l&apos;application
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                logout()
+                toast.success("Déconnecté")
+              }}
+            >
+              Se déconnecter (autre compte)
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    )
   }
 
   return (
